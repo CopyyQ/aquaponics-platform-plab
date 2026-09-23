@@ -397,7 +397,20 @@ def _actuator_electrical_payload(rows: list, now: datetime) -> dict:
     incident = None
     if incident_row is not None:
         incident_id, incident_severity, incident_risk, incident_status, incident_started_at, incident_snapshot, incident_rule_name, incident_evaluator_type = (incident_row["incident_id"], incident_row["incident_severity"], incident_row["incident_risk"], incident_row["incident_status"], incident_row["incident_started_at"], incident_row["incident_trigger_snapshot"], incident_row["incident_rule_name"], incident_row["incident_evaluator_type"])
-        incident = {"id": incident_id, "technical_severity": incident_severity, "business_risk_level": incident_risk, "status": incident_status, "rule_name": incident_rule_name, "evaluator_type": incident_evaluator_type, "condition_summary": _incident_condition_summary(incident_snapshot or {}), "started_at": incident_started_at, "duration_seconds": max(0, int((now - incident_started_at).total_seconds())) if incident_started_at else 0, "evidence": incident_snapshot or {}}
+        snapshot = incident_snapshot or {}
+        rule_name = str(
+            incident_rule_name
+            or snapshot.get("branch_name")
+            or snapshot.get("rule_name")
+            or snapshot.get("scenario_name")
+            or "Cảnh báo vận hành"
+        )
+        evaluator_type = str(
+            incident_evaluator_type
+            or snapshot.get("evaluator_type")
+            or "UNKNOWN"
+        )
+        incident = {"id": incident_id, "technical_severity": incident_severity, "business_risk_level": incident_risk, "status": incident_status, "rule_name": rule_name, "evaluator_type": evaluator_type, "condition_summary": _incident_condition_summary(snapshot), "started_at": incident_started_at, "duration_seconds": max(0, int((now - incident_started_at).total_seconds())) if incident_started_at else 0, "evidence": snapshot}
     return {
         "voltage": voltage, "current": current,
         # Compatibility fields retained while overview consumers migrate.
@@ -574,6 +587,7 @@ async def get_project_monitoring_latest(db: AsyncSession, project_id: int) -> di
                     else None
                 ),
                 "last_reported_at": actuator.last_reported_at,
+                "last_db_updated_at": actuator.updated_at,
                 "electrical": electrical,
                 "active_incident": active_incident,
             }

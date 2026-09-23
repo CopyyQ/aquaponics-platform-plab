@@ -16,7 +16,7 @@ class MqttStatusPayload(BaseModel):
     sent_at: datetime
     ip: str | None = None
     firmware_version: str | None = None
-    actuators: list["MqttActuatorStatus"]
+    actuators: list["MqttActuatorStatus"] = Field(max_length=500)
 
     @field_validator("status", mode="before")
     @classmethod
@@ -32,6 +32,15 @@ class MqttActuatorStatus(BaseModel):
     voltage_v: float | None = None
     current_a: float | None = None
     recorded_at: datetime | None = None
+
+    @field_validator("voltage_v", "current_a")
+    @classmethod
+    def finite_electrical_value(cls, value: float | None) -> float | None:
+        if value is not None and (
+            value != value or value in (float("inf"), float("-inf"))
+        ):
+            raise ValueError("Giá trị điện phải là số hữu hạn")
+        return value
 
 
 class MqttCommandAckPayload(BaseModel):

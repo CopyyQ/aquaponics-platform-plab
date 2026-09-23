@@ -7,7 +7,7 @@ export interface Project {
   name: string
   location: string | null
   description: string | null
-  status: "ACTIVE" | "DISABLED" | "INACTIVE" | "ARCHIVED"
+  status: "ACTIVE" | "DISABLED"
   disabled_at: string | null
   disabled_by_user_id: number | null
   disabled_reason: string | null

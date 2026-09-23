@@ -4,7 +4,7 @@ from datetime import datetime
 from typing import TYPE_CHECKING
 from uuid import UUID, uuid4
 
-from sqlalchemy import BigInteger, DateTime, Enum, ForeignKey, Identity, Index, String, Text
+from sqlalchemy import BigInteger, DateTime, Enum, ForeignKey, Identity, Index, String, Text, text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.dialects.postgresql import UUID as PGUUID
 
@@ -13,7 +13,9 @@ from app.core.enums import ProjectStatus
 
 if TYPE_CHECKING:
     from app.models.device import Device
+    from app.models.device_template import DeviceTemplate
     from app.models.project_member import ProjectMember
+    from app.models.scenario_catalog import ScenarioCatalog
     from app.models.user import User
 
 
@@ -21,6 +23,12 @@ class Project(Base, TimestampMixin, SoftDeleteMixin):
     """Internal compatibility model for the canonical Aquaponics System."""
     __tablename__ = "aquaponics_systems"
     __table_args__ = (
+        Index(
+            "uq_aquaponics_systems_one_active_owner",
+            "owner_user_id",
+            unique=True,
+            postgresql_where=text("status = 'ACTIVE' AND is_deleted = false"),
+        ),
         Index("ix_aquaponics_systems_status", "status"),
         Index("ix_aquaponics_systems_disabled_by_user_id", "disabled_by_user_id"),
     )
@@ -32,6 +40,12 @@ class Project(Base, TimestampMixin, SoftDeleteMixin):
     )
     code: Mapped[str] = mapped_column(String(80), unique=True, index=True)
     name: Mapped[str] = mapped_column(String(255))
+    device_template_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("device_templates.id", ondelete="RESTRICT"), nullable=True, index=True
+    )
+    scenario_catalog_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("scenario_catalogs.id", ondelete="RESTRICT"), nullable=True, index=True
+    )
     location: Mapped[str | None] = mapped_column(String(255))
     description: Mapped[str | None] = mapped_column(Text)
     status: Mapped[ProjectStatus] = mapped_column(
@@ -44,6 +58,8 @@ class Project(Base, TimestampMixin, SoftDeleteMixin):
     disabled_reason: Mapped[str | None] = mapped_column(Text)
 
     owner: Mapped["User"] = relationship(foreign_keys=[owner_user_id])
+    device_template: Mapped["DeviceTemplate | None"] = relationship()
+    scenario_catalog: Mapped["ScenarioCatalog | None"] = relationship()
     disabled_by: Mapped["User | None"] = relationship(foreign_keys=[disabled_by_user_id])
     devices: Mapped[list["Device"]] = relationship(back_populates="project")
     members: Mapped[list["ProjectMember"]] = relationship(

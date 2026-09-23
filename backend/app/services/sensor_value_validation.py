@@ -10,8 +10,7 @@ class SensorValueRange:
 SENSOR_VALUE_RANGES: dict[str, SensorValueRange] = {
     "AIR_HUMIDITY": SensorValueRange(minimum=0.0, maximum=100.0),
     "AIR_TEMPERATURE": SensorValueRange(minimum=-50.0, maximum=100.0),
-    "AIR_PRESSURE": SensorValueRange(minimum=300.0, maximum=1_200.0),
-    "ILLUMINANCE": SensorValueRange(minimum=0.0, maximum=200_000.0),
+    "LIGHT_INTENSITY": SensorValueRange(minimum=0.0, maximum=200_000.0),
 }
 
 

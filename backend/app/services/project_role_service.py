@@ -4,7 +4,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.permission import Role, RoleAssignment
 
 
-PROJECT_ROLE_CODES = frozenset({"OWNER", "TECHNICIAN", "VIEWER"})
+PROJECT_ROLE_CODES = frozenset({"OWNER", "VIEWER"})
 
 
 async def sync_project_role_assignment(

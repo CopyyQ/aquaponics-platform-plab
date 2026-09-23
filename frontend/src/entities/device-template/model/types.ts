@@ -9,7 +9,6 @@ export interface TemplateSensor {
   default_below_threshold_message: string | null;
   default_above_threshold_message: string | null;
   default_alert_risk_level: "EXTREME" | "VERY_HIGH" | "HIGH" | "MEDIUM" | "LOW_MEDIUM" | "LOW" | null;
-  sort_order: number;
   is_required: boolean;
   model_code: string;
   model_name: string;
@@ -33,7 +32,6 @@ export interface TemplateActuator {
   electrical_profile_id: number | null;
   electrical_profile_code: string | null;
   electrical_profile_name: string | null;
-  sort_order: number;
   is_required: boolean;
   is_enabled: boolean;
   model_code: string;
@@ -51,7 +49,6 @@ export interface TemplateActuatorInput {
   command_capability: "ON_OFF";
   monitor_current: boolean;
   electrical_profile_id: number | null;
-  sort_order: number;
   is_required: boolean;
   is_enabled: boolean;
 }
@@ -109,7 +106,6 @@ export interface TemplateSensorInput {
   default_below_threshold_message?: string | null;
   default_above_threshold_message?: string | null;
   default_alert_risk_level?: "EXTREME" | "VERY_HIGH" | "HIGH" | "MEDIUM" | "LOW_MEDIUM" | "LOW" | null;
-  sort_order: number;
   is_required: boolean;
 }
 

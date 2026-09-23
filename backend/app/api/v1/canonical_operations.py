@@ -28,7 +28,6 @@ from app.services.monitoring_service import get_device_actuator_history, get_pro
 from app.services.project_activity_service import ACTION_LABELS, list_project_activities
 from app.services.scada_runtime_service import (ScadaDraftNotFoundError, ScadaLayoutValidationError,
     get_scada_runtime, publish_scada_draft, save_scada_draft)
-from app.services.notification_outbox_service import next_notification_generation, reconcile_active_incident_notifications
 from app.services.aquaponics_system_membership_service import (
     MembershipError, assign_system_member, remove_system_member, update_system_member_role,
 )
@@ -56,12 +55,12 @@ class AlertSettingsUpdate(BaseModel):
 class AquaponicsSystemMemberCreate(BaseModel):
     model_config = ConfigDict(extra="forbid")
     user_id: UUID
-    role: str = Field(default="VIEWER", pattern="^(VIEWER|TECHNICIAN)$")
+    role: str = Field(default="VIEWER", pattern="^VIEWER$")
 
 
 class AquaponicsSystemMemberUpdate(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    role: str = Field(pattern="^(VIEWER|TECHNICIAN)$")
+    role: str = Field(pattern="^VIEWER$")
 
 
 class AquaponicsSystemMemberRead(BaseModel):
@@ -269,14 +268,7 @@ async def put_alert_settings(system_id: UUID, payload: AlertSettingsUpdate, db: 
     system = await _system(db, system_id, actor, manage=True)
     item = await db.scalar(select(ProjectNotificationSettings).where(ProjectNotificationSettings.project_id == system.id))
     if item is None: item = ProjectNotificationSettings(project_id=system.id); db.add(item)
-    changed = (item.enabled, item.telegram_enabled, item.in_app_enabled) != (payload.enabled, payload.telegram_enabled, payload.in_app_enabled)
     item.enabled = payload.enabled
     item.telegram_enabled = payload.telegram_enabled
     item.in_app_enabled = payload.in_app_enabled
-    if changed:
-        generation = await next_notification_generation(db, project_id=system.id)
-        await reconcile_active_incident_notifications(
-            db, project_id=system.id, generation=generation,
-            reason="GENERAL_SETTINGS_CHANGED", skip_previously_informed=True,
-        )
     await db.commit(); return _settings_read(item)

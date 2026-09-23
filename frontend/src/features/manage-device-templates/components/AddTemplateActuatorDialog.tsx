@@ -47,11 +47,9 @@ const TYPE_LABELS: Record<ActuatorType, string> = {
 
 export function AddTemplateActuatorDialog({
   templateId,
-  nextOrder,
   actuator,
 }: {
   templateId: number;
-  nextOrder: number;
   actuator?: TemplateActuator;
 }) {
   const [open, setOpen] = useState(false);
@@ -79,9 +77,6 @@ export function AddTemplateActuatorDialog({
     actuator?.electrical_profile_id
       ? String(actuator.electrical_profile_id)
       : "NONE",
-  );
-  const [sortOrder, setSortOrder] = useState(
-    String(actuator?.sort_order ?? nextOrder),
   );
   const [enabled, setEnabled] = useState(actuator?.is_enabled ?? true);
   const { queryScope } = useProtectedQueryScope();
@@ -114,7 +109,6 @@ export function AddTemplateActuatorDialog({
     monitor_current: monitorCurrent,
     electrical_profile_id:
       monitorCurrent && profileId !== "NONE" ? Number(profileId) : null,
-    sort_order: Number(sortOrder),
     is_required: false,
     is_enabled: enabled,
   });
@@ -140,9 +134,7 @@ export function AddTemplateActuatorDialog({
   const valid = Boolean(
     modelId &&
     /^[A-Z0-9_-]{2,80}$/.test(code.trim().toUpperCase()) &&
-    name.trim() &&
-    Number.isInteger(Number(sortOrder)) &&
-    Number(sortOrder) >= 0,
+    name.trim(),
   );
 
   return (
@@ -304,19 +296,6 @@ export function AddTemplateActuatorDialog({
                 id={`actuator-location-${templateId}-${actuator?.id ?? "new"}`}
                 value={location}
                 onChange={(event) => setLocation(event.target.value)}
-              />
-            </Field>
-            <Field
-              label="Thứ tự hiển thị"
-              id={`actuator-order-${templateId}-${actuator?.id ?? "new"}`}
-            >
-              <Input
-                id={`actuator-order-${templateId}-${actuator?.id ?? "new"}`}
-                type="number"
-                min={0}
-                required
-                value={sortOrder}
-                onChange={(event) => setSortOrder(event.target.value)}
               />
             </Field>
           </div>

@@ -16,7 +16,13 @@ import { Input } from "@/shared/ui/input"
 
 export function ScadaPage() {
   const systemId = useParams().systemId ?? ""; const { can } = useAuth(); const client = useQueryClient(); const [selectedId, setSelectedId] = useState<string | null>(null); const [editMode, setEditMode] = useState(false); const [editorLayout, setEditorLayout] = useState<ScadaLayout | null>(null)
-  const runtime = useQuery({ queryKey: queryKeys.scada(systemId), queryFn: () => getScadaRuntime(systemId), refetchInterval: 15_000 })
+  const runtime = useQuery({
+    queryKey: queryKeys.scada(systemId),
+    queryFn: () => getScadaRuntime(systemId),
+    refetchInterval: 15_000,
+    staleTime: 10_000,
+    gcTime: 60_000,
+  })
   const draft = useMutation({ mutationFn: (layout: ScadaLayout) => saveScadaDraft(systemId, layout), onSuccess: async (saved) => { setEditorLayout(saved.layout); await client.invalidateQueries({ queryKey: queryKeys.scada(systemId) }) } })
   const publish = useMutation({ mutationFn: () => publishScada(systemId), onSuccess: () => void client.invalidateQueries({ queryKey: queryKeys.scada(systemId) }) })
   if (runtime.isLoading) return <div className="space-y-4"><Skeleton className="h-16" /><Skeleton className="h-[32rem]" /></div>

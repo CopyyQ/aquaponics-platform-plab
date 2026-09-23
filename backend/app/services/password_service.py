@@ -1,25 +1,47 @@
 from datetime import UTC, datetime
 
-from fastapi import HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.enums import UserStatus
+from app.core.exceptions import ApplicationError
 from app.core.security import hash_password
 from app.models.user import User
-from app.schemas.user import AdminSetPasswordRequest, AdminSetPasswordResponse, ResetPasswordRequest
+from app.schemas.user import (
+    AdminSetPasswordRequest,
+    AdminSetPasswordResponse,
+    ResetPasswordRequest,
+)
 from app.services.audit_service import write_audit
+from app.services.auth_session_service import revoke_user_sessions
 
 
 async def admin_set_user_password(
-    db: AsyncSession, *, user: User, payload: AdminSetPasswordRequest, actor: User
+    db: AsyncSession,
+    *,
+    user: User,
+    payload: AdminSetPasswordRequest,
+    actor: User,
 ) -> AdminSetPasswordResponse:
-    if user.is_deleted or user.deleted_at is not None or user.status == UserStatus.SOFT_DELETED:
-        raise HTTPException(status_code=409, detail="Hãy khôi phục tài khoản trước khi đặt lại mật khẩu")
-    user.password_hash = hash_password(payload.new_password)
+    if (
+        user.is_deleted
+        or user.deleted_at is not None
+        or user.status == UserStatus.SOFT_DELETED
+    ):
+        raise ApplicationError(
+            "ACCOUNT_RESTORE_REQUIRED",
+            "Hãy khôi phục tài khoản trước khi đặt lại mật khẩu",
+            409,
+        )
+    user.password_hash = hash_password(
+        payload.new_password
+    )
     user.password_changed_at = datetime.now(UTC)
-    user.must_change_password = payload.must_change_password
+    user.must_change_password = (
+        payload.must_change_password
+    )
     if payload.invalidate_sessions:
         user.token_version += 1
+        await revoke_user_sessions(db, user.id, "PASSWORD_CHANGED")
     await write_audit(
         db,
         user_id=actor.id,
@@ -41,15 +63,30 @@ async def admin_set_user_password(
 
 
 async def admin_reset_user_password(
-    db: AsyncSession, *, user: User, payload: ResetPasswordRequest, actor: User
+    db: AsyncSession,
+    *,
+    user: User,
+    payload: ResetPasswordRequest,
+    actor: User,
 ) -> None:
     if not payload.passwords_match:
-        raise HTTPException(status_code=422, detail="Mật khẩu xác nhận không trùng khớp")
-    user.password_hash = hash_password(payload.temporary_password)
+        raise ApplicationError(
+            "PASSWORD_CONFIRMATION_MISMATCH",
+            "Mật khẩu xác nhận không trùng khớp",
+            422,
+        )
+    user.password_hash = hash_password(
+        payload.temporary_password
+    )
     user.must_change_password = True
     user.password_changed_at = datetime.now(UTC)
     user.token_version += 1
+    await revoke_user_sessions(db, user.id, "PASSWORD_RESET")
     await write_audit(
-        db, user_id=actor.id, action="RESET_PASSWORD", entity_type="USER", entity_id=user.id
+        db,
+        user_id=actor.id,
+        action="RESET_PASSWORD",
+        entity_type="USER",
+        entity_id=user.id,
     )
     await db.commit()

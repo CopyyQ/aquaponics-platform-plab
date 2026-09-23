@@ -55,7 +55,6 @@ class TemplateSensorInput(BaseModel):
     default_above_threshold_message: str | None = Field(default=None, max_length=2000)
     default_below_risk_level: str | None = Field(default=None, pattern="^(EXTREME|VERY_HIGH|HIGH|MEDIUM|LOW_MEDIUM|LOW)$")
     default_above_risk_level: str | None = Field(default=None, pattern="^(EXTREME|VERY_HIGH|HIGH|MEDIUM|LOW_MEDIUM|LOW)$")
-    sort_order: int = Field(default=0, ge=0)
     is_required: bool = False
 
     @model_validator(mode="after")
@@ -76,7 +75,6 @@ class TemplateSensorUpdate(BaseModel):
     default_above_threshold_message: str | None = Field(default=None, max_length=2000)
     default_below_risk_level: str | None = Field(default=None, pattern="^(EXTREME|VERY_HIGH|HIGH|MEDIUM|LOW_MEDIUM|LOW)$")
     default_above_risk_level: str | None = Field(default=None, pattern="^(EXTREME|VERY_HIGH|HIGH|MEDIUM|LOW_MEDIUM|LOW)$")
-    sort_order: int | None = Field(default=None, ge=0)
     is_required: bool | None = None
 
     @model_validator(mode="after")
@@ -104,7 +102,6 @@ class TemplateSensorRead(BaseModel):
     default_above_threshold_message: str | None
     default_below_risk_level: str | None
     default_above_risk_level: str | None
-    sort_order: int
     is_required: bool
     model_code: str
     model_name: str
@@ -125,7 +122,6 @@ class TemplateActuatorInput(BaseModel):
     command_capability: str = Field(default="ON_OFF", pattern="^ON_OFF$")
     monitor_current: bool = False
     electrical_profile_id: int | None = None
-    sort_order: int = Field(default=0, ge=0)
     is_required: bool = False
     is_enabled: bool = True
 
@@ -145,7 +141,6 @@ class TemplateActuatorUpdate(BaseModel):
     command_capability: str | None = Field(default=None, pattern="^ON_OFF$")
     monitor_current: bool | None = None
     electrical_profile_id: int | None = None
-    sort_order: int | None = Field(default=None, ge=0)
     is_required: bool | None = None
     is_enabled: bool | None = None
 
@@ -170,7 +165,6 @@ class TemplateActuatorRead(BaseModel):
     electrical_profile_id: int | None
     electrical_profile_code: str | None
     electrical_profile_name: str | None
-    sort_order: int
     is_required: bool
     is_enabled: bool
     model_code: str

@@ -188,7 +188,7 @@ export function ActuatorOperationChart({
 
     canvas.addEventListener("wheel", handleWheelNative, { passive: false });
     return () => canvas.removeEventListener("wheel", handleWheelNative);
-  }, [fullDomain.start, fullDomain.end, points.length]);
+  }, [fullDomain, points.length]);
 
   useEffect(() => {
     const previous = previousFullDomainRef.current;
@@ -220,7 +220,7 @@ export function ActuatorOperationChart({
 
       return clampViewport(current, fullDomain);
     });
-  }, [fullDomain.start, fullDomain.end]);
+  }, [fullDomain]);
 
   useEffect(() => {
     const element = containerRef.current;
@@ -275,11 +275,6 @@ export function ActuatorOperationChart({
     [visibleIntervals, viewport.start, viewport.end, metrics.plotWidth],
   );
 
-  const visiblePointRange = useMemo(
-    () => findPointRange(points, viewport.start, viewport.end),
-    [points, viewport.start, viewport.end],
-  );
-
   const visualPoints = useMemo(
     () =>
       downsampleElectricalPoints(
@@ -321,7 +316,6 @@ export function ActuatorOperationChart({
     transitionTimes.length > 0 &&
     transitionTimes.length <= 40;
 
-  const rawVisibleCount = Math.max(0, visiblePointRange.end - visiblePointRange.start);
   const activePoint = activeIndex === null ? null : points[activeIndex] ?? null;
   const isZoomed = !sameViewport(viewport, fullDomain);
 

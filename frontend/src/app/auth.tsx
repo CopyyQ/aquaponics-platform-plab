@@ -1,6 +1,11 @@
 import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from "react"
 import { loadSession, logout as logoutRequest } from "@/api/resources"
 import type { Session } from "@/api/contracts"
+import {
+  ACCESS_TOKEN_STORAGE_KEY,
+  clearStoredAccessToken,
+  refreshAccessToken,
+} from "@/shared/api/auth-refresh"
 
 interface AuthState {
   session: Session | null
@@ -16,17 +21,31 @@ const AuthContext = createContext<AuthState | null>(null)
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [session, setSession] = useState<Session | null>(null)
   const [loading, setLoading] = useState(true)
+
   const reload = async () => {
-    if (!localStorage.getItem("aquaponics_access_token")) {
+    setLoading(true)
+    try {
+      if (!localStorage.getItem(ACCESS_TOKEN_STORAGE_KEY)) {
+        await refreshAccessToken()
+      }
+      setSession(await loadSession())
+    } catch {
+      clearStoredAccessToken()
       setSession(null)
+    } finally {
       setLoading(false)
-      return
     }
-    try { setSession(await loadSession()) } catch { setSession(null) } finally { setLoading(false) }
   }
+
   const logout = async () => {
-    try { await logoutRequest() } finally { localStorage.removeItem("aquaponics_access_token"); setSession(null) }
+    try {
+      await logoutRequest()
+    } finally {
+      clearStoredAccessToken()
+      setSession(null)
+    }
   }
+
   useEffect(() => {
     void reload()
     const expired = () => setSession(null)
@@ -37,6 +56,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       window.removeEventListener("aquaponics:authentication-failure", expired)
     }
   }, [])
+
   const value = useMemo(() => {
     const can = (permission: string) => Boolean(session?.permissions.includes(permission))
     return { session, loading, can, has: can, reload, logout }

@@ -3,7 +3,7 @@ import hashlib
 import json
 import re
 
-from fastapi import HTTPException
+from app.core.exceptions import ApplicationError
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -57,32 +57,27 @@ async def build_mqtt_connection_config(
         )
     ).first()
     if context is None:
-        raise HTTPException(
-            status_code=404,
-            detail="Không tìm thấy thiết bị trong dự án",
+        raise ApplicationError(
+            "DEVICE_NOT_FOUND",
+            "Không tìm thấy thiết bị trong dự án",
+            404,
         )
     project, device, owner = context
-    if (
-        project.status != ProjectStatus.ACTIVE
-    ):
-        raise HTTPException(
-            status_code=409,
-            detail={
-                "code": "PROJECT_INACTIVE",
-                "detail": "Dự án hoặc thiết bị không hoạt động.",
-            },
+    if project.status != ProjectStatus.ACTIVE:
+        raise ApplicationError(
+            "PROJECT_INACTIVE",
+            "Dự án hoặc thiết bị không hoạt động.",
+            409,
         )
     if (
         owner.status != UserStatus.ACTIVE
         or owner.is_deleted
         or owner.deleted_at is not None
     ):
-        raise HTTPException(
-            status_code=409,
-            detail={
-                "code": "PROJECT_OWNER_INACTIVE",
-                "detail": "Tài khoản chủ dự án không hoạt động.",
-            },
+        raise ApplicationError(
+            "PROJECT_OWNER_INACTIVE",
+            "Tài khoản chủ dự án không hoạt động.",
+            409,
         )
 
     sensor_rows = list(

@@ -1,11 +1,8 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { ArrowDown, ArrowUp, Layers3, Power, Trash2, Zap } from "lucide-react";
+import { Layers3, Power, Trash2, Zap } from "lucide-react";
 import { toast } from "sonner";
 import { deviceTemplateApi } from "@/entities/device-template/api/device-template-api";
-import type {
-  DeviceTemplate,
-  TemplateSensor,
-} from "@/entities/device-template/model/types";
+import type { DeviceTemplate } from "@/entities/device-template/model/types";
 import { AddTemplateSensorDialog } from "@/features/manage-device-templates/components/AddTemplateSensorDialog";
 import { AddTemplateActuatorDialog } from "@/features/manage-device-templates/components/AddTemplateActuatorDialog";
 import { DeviceTemplateDialog } from "@/features/manage-device-templates/components/DeviceTemplateDialog";
@@ -33,9 +30,7 @@ const ENERGY_CODES = [
 
 export function DeviceTemplateCard({ template }: { template: DeviceTemplate }) {
   const client = useQueryClient();
-  const sensors = [...template.sensors].sort(
-    (left, right) => left.sort_order - right.sort_order || left.id - right.id,
-  );
+  const sensors = [...template.sensors].sort((left, right) => left.id - right.id);
   const remove = useMutation({
     mutationFn: () => deviceTemplateApi.remove(template.id),
     onSuccess: async () => {
@@ -70,27 +65,6 @@ export function DeviceTemplateCard({ template }: { template: DeviceTemplate }) {
       toast.success("Đã bổ sung cấu hình cảm biến năng lượng mặc định");
     },
     onError: () => toast.error("Không thể bổ sung cảm biến mặc định"),
-  });
-  const reorder = useMutation({
-    mutationFn: async ({
-      sensor,
-      target,
-    }: {
-      sensor: TemplateSensor;
-      target: TemplateSensor;
-    }) => {
-      await deviceTemplateApi.updateSensor(template.id, sensor.id, {
-        sort_order: target.sort_order,
-      });
-      await deviceTemplateApi.updateSensor(template.id, target.id, {
-        sort_order: sensor.sort_order,
-      });
-    },
-    onSuccess: async () => {
-      await invalidateQueries.deviceTemplates(client);
-      toast.success("Đã lưu thứ tự hiển thị");
-    },
-    onError: () => toast.error("Không thể đổi thứ tự hiển thị"),
   });
   const mappedCodes = new Set(sensors.map((sensor) => sensor.model_code));
   const missingEnergyMappings = ENERGY_CODES.filter(
@@ -222,30 +196,6 @@ export function DeviceTemplateCard({ template }: { template: DeviceTemplate }) {
                       <Button
                         variant="ghost"
                         size="icon"
-                        aria-label={`Di chuyển ${sensor.model_name} lên`}
-                        disabled={index === 0 || reorder.isPending}
-                        onClick={() =>
-                          reorder.mutate({ sensor, target: sensors[index - 1] })
-                        }
-                      >
-                        <ArrowUp />
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        aria-label={`Di chuyển ${sensor.model_name} xuống`}
-                        disabled={
-                          index === sensors.length - 1 || reorder.isPending
-                        }
-                        onClick={() =>
-                          reorder.mutate({ sensor, target: sensors[index + 1] })
-                        }
-                      >
-                        <ArrowDown />
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="icon"
                         aria-label={
                           canonicalLocked
                             ? `${sensor.model_name} là phép đo bắt buộc`
@@ -278,7 +228,7 @@ export function DeviceTemplateCard({ template }: { template: DeviceTemplate }) {
           {template.actuators.length ? (
             <ol className="mt-2 flex flex-col gap-2">
               {[...template.actuators]
-                .sort((left, right) => left.sort_order - right.sort_order)
+                .sort((left, right) => left.id - right.id)
                 .map((actuator, index) => (
                   <li
                     key={actuator.id}
@@ -319,7 +269,6 @@ export function DeviceTemplateCard({ template }: { template: DeviceTemplate }) {
                     <div className="flex items-center gap-1">
                   <AddTemplateActuatorDialog
                     templateId={template.id}
-                    nextOrder={actuator.sort_order}
                     actuator={actuator}
                   />
                       <Button
@@ -355,7 +304,6 @@ export function DeviceTemplateCard({ template }: { template: DeviceTemplate }) {
         <AddTemplateSensorDialog
           templateId={template.id}
           mappedModelIds={sensors.map((item) => item.sensor_model_id)}
-          nextOrder={Math.max(0, ...sensors.map((item) => item.sort_order))}
         />
         {template.device_kind === "ENERGY_MONITOR" ? (
           <Button
@@ -368,15 +316,7 @@ export function DeviceTemplateCard({ template }: { template: DeviceTemplate }) {
             Bổ sung 6 phép đo chuẩn
           </Button>
         ) : (
-            <AddTemplateActuatorDialog
-              templateId={template.id}
-              nextOrder={
-                Math.max(
-                0,
-                ...template.actuators.map((item) => item.sort_order),
-                ) + 1
-              }
-            />
+            <AddTemplateActuatorDialog templateId={template.id} />
         )}
         <Button
           variant="outline"

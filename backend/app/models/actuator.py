@@ -116,6 +116,13 @@ class ActuatorReading(Base):
 
 class ActuatorCommand(Base, TimestampMixin):
     __tablename__ = "actuator_commands"
+    __table_args__ = (
+        Index(
+            "ix_actuator_commands_status_next_publish_attempt",
+            "status",
+            "next_publish_attempt_at",
+        ),
+    )
 
     id: Mapped[int] = mapped_column(BigInteger, Identity(always=True), primary_key=True)
     actuator_id: Mapped[int] = mapped_column(
@@ -128,6 +135,10 @@ class ActuatorCommand(Base, TimestampMixin):
     requested_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     acknowledged_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    publish_attempt_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    last_publish_attempt_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    next_publish_attempt_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    publish_failure_reason: Mapped[str | None] = mapped_column(String(120))
     failed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     timed_out_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     failure_reason: Mapped[str | None] = mapped_column(Text)

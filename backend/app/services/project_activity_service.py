@@ -10,7 +10,6 @@ from app.models.audit import AuditLog
 from app.models.project import Project
 from app.models.user import User
 from app.services.audit_service import write_audit
-from app.services.notification_outbox_service import enqueue_project_activity_notification
 
 logger = logging.getLogger(__name__)
 
@@ -49,6 +48,12 @@ ACTION_LABELS = {
     "REMOTE_MONITORING_ENABLED": "Bật theo dõi từ xa",
     "REMOTE_MONITORING_DISABLED": "Tắt theo dõi từ xa",
     "ALERT_RESOLVED": "Xác nhận đã khắc phục cảnh báo",
+    "PROJECT_SCENARIO_CREATED": "Tạo kịch bản vận hành",
+    "PROJECT_SCENARIO_CLONED": "Nhân bản kịch bản vận hành",
+    "PROJECT_SCENARIO_UPDATED": "Cập nhật kịch bản vận hành",
+    "PROJECT_SCENARIO_ACTIVATED": "Chuyển kịch bản vận hành",
+    "PROJECT_SCENARIO_RETIRED": "Xóa kịch bản vận hành",
+    "PROJECT_SCENARIO_BRANCH_UPDATED": "Cập nhật nhánh kịch bản",
 }
 
 HEADINGS = {
@@ -133,32 +138,8 @@ async def dispatch_project_activity(
     *,
     activity_id: int,
 ) -> None:
-    row = (
-        await db.execute(
-            select(AuditLog, Project, User)
-            .join(Project, Project.id == AuditLog.project_id)
-            .outerjoin(User, User.id == AuditLog.user_id)
-            .where(AuditLog.id == activity_id)
-        )
-    ).first()
-    if row is None:
-        return
-    activity, project, actor = row
-    message = format_project_activity_message(activity, project, actor)
-    await enqueue_project_activity_notification(
-        db,
-        project_id=project.id,
-        activity_id=activity.id,
-        payload_snapshot={
-            "message": message,
-            "project_name": project.name,
-            "project_code": project.code,
-            "recorded_at": activity.created_at.isoformat() if activity.created_at else None,
-        },
-    )
-    # Existing callers record and commit the audit row first. Commit the
-    # durable event here; duplicate calls are harmless due to its key.
-    await db.commit()
+    """Project activities stay in the Activity log and are never Telegram pushes."""
+    del db, activity_id
 
 
 async def list_project_activities(db: AsyncSession, *, project_id: int, page: int, page_size: int, action: str | None, entity_type: str | None) -> tuple[list[AuditLog], int]:

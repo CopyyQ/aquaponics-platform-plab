@@ -10,12 +10,14 @@ import {
   Trash2,
 } from "lucide-react";
 import { Link, useNavigate, useParams } from "react-router-dom";
+import { toast } from "sonner";
 import {
   createCommand,
   deleteActuator,
   getActuator,
   getDevice,
   getMonitoringActuatorHistory,
+  getMonitoringLatest,
   listActuatorCommands,
   listActuatorReadings,
   queryKeys,
@@ -28,9 +30,12 @@ import {
   actuatorStateLabel,
   commandStatusLabel,
   desiredStateLabel,
+  desiredStateValueLabel,
   synchronizationLabel,
 } from "@/entities/actuator/lib/actuator-semantics";
-import { AlertScenarioSection } from "@/features/alert-scenarios/AlertScenarioSection";
+import { actuatorCommandAvailability } from "@/features/manage-actuator/model/actuator-control-policy";
+import { waitForActuatorCommandFeedback } from "@/features/manage-actuator/model/actuator-command-feedback";
+import { runtimeRefetchInterval } from "@/features/manage-actuator/model/device-runtime-refresh";
 import { ActuatorOperationChart } from "@/features/view-device-monitoring-history/ui/ActuatorOperationChart";
 import { MonitoringRangeSelector } from "@/features/view-device-monitoring-history/ui/MonitoringRangeSelector";
 import {
@@ -73,30 +78,47 @@ export function ActuatorDetailPage() {
     queryFn: () => getActuator(systemId, deviceId, actuatorId),
     enabled: validIds,
     refetchInterval: 10_000,
+    staleTime: 8_000,
+    gcTime: 60_000,
   });
   const device = useQuery({
     queryKey: queryKeys.device(systemId, deviceId),
     queryFn: () => getDevice(systemId, deviceId),
     enabled: validIds,
     refetchInterval: 10_000,
+    staleTime: 8_000,
+    gcTime: 60_000,
+  });
+  const monitoring = useQuery({
+    queryKey: queryKeys.monitoringLatest(systemId),
+    queryFn: () => getMonitoringLatest(systemId),
+    enabled: validIds && can("monitoring.read"),
+    refetchInterval: () => runtimeRefetchInterval(document.visibilityState),
+    refetchOnWindowFocus: true,
   });
   const operation = useQuery({
     queryKey: queryKeys.monitoringActuatorHistory(systemId, deviceId, range),
     queryFn: () => getMonitoringActuatorHistory(systemId, deviceId, range),
     enabled: validIds && can("actuators.readings.read"),
     refetchInterval: 15_000,
+    staleTime: 12_000,
+    gcTime: 60_000,
   });
   const readings = useQuery({
     queryKey: queryKeys.actuatorReadings(systemId, deviceId, actuatorId, 50),
     queryFn: () => listActuatorReadings(systemId, deviceId, actuatorId, 50),
     enabled: validIds && can("actuators.readings.read"),
     refetchInterval: 15_000,
+    staleTime: 12_000,
+    gcTime: 60_000,
   });
   const commands = useQuery({
     queryKey: queryKeys.actuatorCommands(systemId, deviceId, actuatorId, 20),
     queryFn: () => listActuatorCommands(systemId, deviceId, actuatorId, 20),
     enabled: validIds && can("actuators.commands.read"),
     refetchInterval: 5_000,
+    staleTime: 3_000,
+    gcTime: 60_000,
   });
   useEffect(() => {
     if (actuator.data)
@@ -138,9 +160,38 @@ export function ActuatorDetailPage() {
     ]);
   };
   const command = useMutation({
-    mutationFn: (desired_state: boolean) =>
-      createCommand(systemId, deviceId, actuatorId, { desired_state }),
-    onSuccess: refreshRuntime,
+    mutationFn: async (desiredState: boolean) => {
+      const created = await createCommand(systemId, deviceId, actuatorId, {
+        desired_state: desiredState,
+      });
+      await waitForActuatorCommandFeedback({
+        commandId: created.command_id,
+        desiredState,
+        readCommands: () =>
+          listActuatorCommands(systemId, deviceId, actuatorId, 10),
+      });
+      return created;
+    },
+    onMutate: (desiredState) => {
+      toast.loading(
+        `${actuator.data?.name ?? "Actuator"}: Đang chờ thiết bị phản hồi lệnh ${desiredState ? "bật" : "tắt"}...`,
+        { id: `actuator-command-${actuatorId}` },
+      );
+    },
+    onSuccess: async (_created, desiredState) => {
+      await refreshRuntime();
+      toast.success(
+        `${actuator.data?.name ?? "Actuator"} đã ${desiredState ? "bật" : "tắt"} thành công`,
+        { id: `actuator-command-${actuatorId}` },
+      );
+    },
+    onError: (error) => {
+      void refreshRuntime();
+      toast.error(
+        `${actuator.data?.name ?? "Actuator"}: ${error instanceof Error ? error.message : errorMessage(error)}`,
+        { id: `actuator-command-${actuatorId}` },
+      );
+    },
   });
   const saveActuator = useMutation({
     mutationFn: () => updateActuator(systemId, deviceId, actuatorId, editDraft),
@@ -177,7 +228,23 @@ export function ActuatorDetailPage() {
       />
     );
   const value = actuator.data;
-  const sync = synchronizationLabel(value.desired_state, value.reported_state);
+  const monitoredDevice = monitoring.data?.devices.find(
+    (item) => String(item.id) === deviceId,
+  );
+  const runtime = monitoredDevice?.actuators.find(
+    (item) => String(item.id) === actuatorId,
+  );
+  const desiredState = runtime ? runtime.desired_state : value.desired_state;
+  const reportedState = runtime ? runtime.reported_state : value.reported_state;
+  const sync = synchronizationLabel(desiredState, reportedState);
+  const commandAvailability = actuatorCommandAvailability({
+    connectionStatus: runtime?.connection_status ?? device.data.status,
+    isEnabled: value.is_enabled,
+    commandPending: command.isPending,
+    desiredState,
+    reportedState,
+    hasActiveAlert: Boolean(runtime?.active_alert),
+  });
   const history = operation.data?.items.find(
     (item) => item.actuator_id === actuatorId,
   );
@@ -188,6 +255,7 @@ export function ActuatorDetailPage() {
     ? commands.data
     : commands.data?.slice(0, 10);
   const latestAt =
+    runtime?.last_reported_at ??
     history?.readings.at(-1)?.recorded_at ??
     history?.points.at(-1)?.recorded_at ??
     null;
@@ -208,7 +276,7 @@ export function ActuatorDetailPage() {
             <h1 className="text-balance text-2xl font-semibold">
               {value.name}
             </h1>
-            <StatusBadge value={device.data.status} />
+            <StatusBadge value={runtime?.connection_status ?? device.data.status} />
           </div>
           <p className="mt-1 text-sm text-muted-foreground">
             {value.code} ·{" "}
@@ -342,20 +410,20 @@ export function ActuatorDetailPage() {
         </h2>
         <div className="grid gap-4 sm:grid-cols-3">
           <Info
-            label="Trạng thái"
-            value={actuatorStateLabel(value.reported_state)}
+            label="Trạng thái báo về gần nhất"
+            value={actuatorStateLabel(reportedState)}
           />
           <Info
-            label="Điện áp"
+            label="Điện áp đo được"
             value={value.voltage_v == null ? "—" : `${value.voltage_v} V`}
           />
           <Info
-            label="Dòng điện"
+            label="Dòng điện đo được"
             value={value.current_a == null ? "—" : `${value.current_a} A`}
           />
         </div>
         <div className="mt-3 text-sm text-muted-foreground">
-          <p>{desiredStateLabel(value.desired_state)}</p>
+          <p>{desiredStateLabel(desiredState)}</p>
           <p
             className={
               sync === "Chưa đồng bộ" ? "font-medium text-amber-700" : ""
@@ -371,6 +439,20 @@ export function ActuatorDetailPage() {
               : "Chưa có dữ liệu"}
           </p>
         </div>
+        {runtime?.active_alert ? (
+          <div
+            role="alert"
+            className="mt-3 rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900"
+          >
+            <p className="font-medium">⚠ {runtime.active_alert.rule_name}</p>
+            <p className="mt-1">{runtime.active_alert.condition_summary}</p>
+            <p className="mt-1 text-xs text-amber-800">
+              Điện áp, dòng điện và trạng thái đồng bộ là tín hiệu cảnh báo,
+              không phải khóa điều khiển. Bạn vẫn có thể gửi lại lệnh khi
+              Device trực tuyến và Actuator đang được kích hoạt.
+            </p>
+          </div>
+        ) : null}
       </section>
       <MonitoringRangeSelector range={range} onRangeChange={setRange} />
       {operation.isLoading ? (
@@ -402,42 +484,37 @@ export function ActuatorDetailPage() {
             <div className="flex flex-wrap gap-3">
               <Button
                 onClick={() => command.mutate(true)}
-                disabled={command.isPending}
+                disabled={!commandAvailability.allowed}
               >
                 <CheckCircle2 />
-                Bật
+                {command.isPending && command.variables === true
+                  ? "Đang chờ thiết bị phản hồi..."
+                  : "Bật"}
               </Button>
               <Button
                 variant="outline"
                 onClick={() => command.mutate(false)}
-                disabled={command.isPending}
+                disabled={!commandAvailability.allowed}
               >
-                Tắt
+                {command.isPending && command.variables === false
+                  ? "Đang chờ thiết bị phản hồi..."
+                  : "Tắt"}
               </Button>
             </div>
             <p className="text-sm">
-              Trạng thái thực tế: {actuatorStateLabel(value.reported_state)} ·
-              Yêu cầu hiện tại: {desiredStateLabel(value.desired_state)} ·{" "}
+              Trạng thái báo về gần nhất: {actuatorStateLabel(reportedState)} ·
+              Yêu cầu gần nhất: {desiredStateValueLabel(desiredState)} ·{" "}
               {sync}
             </p>
             {command.isError ? (
               <p role="alert" className="text-sm text-destructive">
-                {errorMessage(command.error)}
+                {command.error instanceof Error
+                  ? command.error.message
+                  : errorMessage(command.error)}
               </p>
             ) : null}
           </CardContent>
         </Card>
-      ) : null}
-      {can("actuators.thresholds.read") ? (
-        <AlertScenarioSection
-          target="ACTUATOR"
-          systemId={systemId}
-          deviceId={deviceId}
-          resourceId={actuatorId}
-          canCreate={can("actuators.thresholds.create")}
-          canUpdate={can("actuators.thresholds.update")}
-          canDelete={can("actuators.thresholds.delete")}
-        />
       ) : null}
       <section>
         <div className="mb-3 flex items-center justify-between">

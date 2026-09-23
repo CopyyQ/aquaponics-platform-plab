@@ -4,8 +4,23 @@ from datetime import datetime
 from typing import Any
 from uuid import UUID, uuid4
 
-from sqlalchemy import BigInteger, Boolean, CheckConstraint, DateTime, Float, ForeignKey, Identity, Index, Integer, String, Text, UniqueConstraint, func, text
-from sqlalchemy.dialects.postgresql import JSONB, UUID as PGUUID
+from sqlalchemy import (
+    BigInteger,
+    Boolean,
+    CheckConstraint,
+    DateTime,
+    ForeignKey,
+    Identity,
+    Index,
+    Integer,
+    String,
+    Text,
+    UniqueConstraint,
+    func,
+    text,
+)
+from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy.dialects.postgresql import UUID as PGUUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base, TimestampMixin
@@ -146,6 +161,15 @@ class OperationalIncident(Base, TimestampMixin):
         Index("ix_operational_incidents_rule_status", "rule_id", "status"),
         Index("uq_active_operational_incident", "rule_id", "context_key", unique=True, postgresql_where=text("status IN ('PENDING','OPEN','ACKNOWLEDGED')")),
         Index("uq_active_operational_incident_project_context", "aquaponics_system_id", "context_key", unique=True, postgresql_where=text("status IN ('PENDING','OPEN','ACKNOWLEDGED')")),
+        Index(
+            "uq_active_operational_incident_scenario_branch",
+            "project_scenario_branch_id",
+            unique=True,
+            postgresql_where=text(
+                "project_scenario_branch_id IS NOT NULL "
+                "AND status IN ('PENDING','OPEN','ACKNOWLEDGED')"
+            ),
+        ),
         CheckConstraint("status IN ('PENDING','OPEN','ACKNOWLEDGED','NORMALIZED','RESOLVED')", name="operational_incident_status_allowed"),
         CheckConstraint("technical_severity IN ('WARNING','CRITICAL')", name="operational_incident_severity_allowed"),
     )
@@ -159,6 +183,21 @@ class OperationalIncident(Base, TimestampMixin):
     device_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("devices.id", ondelete="RESTRICT"))
     sensor_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("sensors.id", ondelete="RESTRICT"))
     actuator_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("actuators.id", ondelete="RESTRICT"))
+    project_scenario_id: Mapped[int | None] = mapped_column(
+        BigInteger,
+        ForeignKey("project_scenarios.id", ondelete="RESTRICT"),
+        index=True,
+    )
+    project_scenario_item_id: Mapped[int | None] = mapped_column(
+        BigInteger,
+        ForeignKey("project_scenario_items.id", ondelete="RESTRICT"),
+        index=True,
+    )
+    project_scenario_branch_id: Mapped[int | None] = mapped_column(
+        BigInteger,
+        ForeignKey("project_scenario_branches.id", ondelete="RESTRICT"),
+        index=True,
+    )
     context_key: Mapped[str] = mapped_column(String(160))
     status: Mapped[str] = mapped_column(String(30))
     technical_severity: Mapped[str] = mapped_column(String(30))
@@ -174,6 +213,7 @@ class OperationalIncident(Base, TimestampMixin):
     acknowledged_by: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("users.id", ondelete="SET NULL"))
     resolved_by: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("users.id", ondelete="SET NULL"))
     resolution_note: Mapped[str | None] = mapped_column(Text)
+    resolution_reason: Mapped[str | None] = mapped_column(String(50))
 
 
 class NotificationOutbox(Base):

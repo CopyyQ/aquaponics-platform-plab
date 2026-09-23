@@ -146,7 +146,7 @@ class MultiConditionEvaluator(BaseEvaluator):
         errors: list[str] = []
         if config.get("logic", "AND") != "AND":
             errors.append("logic")
-        if all(config.get(field) is None for field in ("reported_state", "voltage", "current")):
+        if all(config.get(field) is None for field in ("desired_state", "reported_state", "voltage", "current")):
             errors.append("conditions")
         for field in ("voltage", "current"):
             bounds = config.get(field)
@@ -168,6 +168,8 @@ class MultiConditionEvaluator(BaseEvaluator):
 
     def evaluate(self, config: dict[str, Any], context: dict[str, Any]) -> EvaluationResult:
         conditions: list[bool] = []
+        if config.get("desired_state") is not None:
+            conditions.append(context.get("desired_state") is config["desired_state"])
         if config.get("reported_state") is not None:
             conditions.append(context.get("reported_state") is config["reported_state"])
         if config.get("voltage") is not None:

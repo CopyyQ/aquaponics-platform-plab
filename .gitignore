@@ -12,3 +12,16 @@ dist/
 .vscode/
 playwright-report/
 test-results/
+.agents/
+.claude/
+docs/
+**/AGENTS.md
+skills-lock.json
+*.docx
+*.xlsx
+*.xls
+*.pdf
+*.pptx
+.local-backups/
+.worktrees/
+_codex_tmp*

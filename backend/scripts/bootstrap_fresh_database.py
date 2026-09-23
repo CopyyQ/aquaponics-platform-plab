@@ -8,15 +8,14 @@ import asyncio
 import sys
 from pathlib import Path
 
-from alembic import command
 from alembic.config import Config
 from sqlalchemy import inspect, text
 
+from alembic import command
+
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from app.core.config import settings
-from app.core.database import Base, engine
-from app import models  # noqa: F401
+from app.core.database import engine
 from scripts.seed import seed
 
 ALLOWED_DATABASE_PREFIXES = ("aquaponics_codex_", "aquaponics_test_", "aquaponics_fresh_")
@@ -42,21 +41,12 @@ async def _seed_and_dispose() -> None:
         await engine.dispose()
 
 
-async def _create_current_baseline() -> None:
-    try:
-        async with engine.begin() as connection:
-            await connection.run_sync(Base.metadata.create_all)
-    finally:
-        await engine.dispose()
-
-
 def bootstrap() -> None:
     asyncio.run(_assert_empty_disposable_database())
     config = Config(str(Path(__file__).resolve().parents[1] / "alembic.ini"))
-    asyncio.run(_create_current_baseline())
-    command.stamp(config, "head")
+    command.upgrade(config, "head")
     asyncio.run(_seed_and_dispose())
-    print(f"Fresh canonical bootstrap completed at Alembic head: {settings.database_url}")
+    print("Fresh canonical bootstrap completed at Alembic head")
 
 
 if __name__ == "__main__":

@@ -19,7 +19,7 @@ from app.services.public_identity_service import (
 )
 
 router = APIRouter()
-SYSTEM_ROLES = frozenset({"ADMIN", "OWNER", "TECHNICIAN", "VIEWER"})
+SYSTEM_ROLES = frozenset({"ADMIN", "OWNER", "VIEWER"})
 
 
 class PermissionCreate(BaseModel):
@@ -249,7 +249,7 @@ async def create_assignment(payload: AssignmentCreate, db: AsyncSession = Depend
     role = await _entity(db, Role, payload.role_id, "Role")
     if not role.enabled: raise HTTPException(422, "Role đã bị vô hiệu hóa")
     if payload.scope_type == "AQUAPONICS_SYSTEM":
-        if role.code not in {"OWNER", "TECHNICIAN", "VIEWER"}: raise HTTPException(422, "Role không phù hợp project scope")
+        if role.code not in {"OWNER", "VIEWER"}: raise HTTPException(422, "Role không phù hợp project scope")
     existing = await db.scalar(select(RoleAssignment).where(RoleAssignment.user_id == user.id, RoleAssignment.role_id == payload.role_id,
         RoleAssignment.scope_type == payload.scope_type, RoleAssignment.scope_id.is_(None) if scope_id is None else RoleAssignment.scope_id == scope_id))
     if existing: raise HTTPException(409, "Role assignment đã tồn tại")

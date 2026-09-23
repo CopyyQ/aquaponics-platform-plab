@@ -15,7 +15,7 @@ def main() -> None:
     out = Path(__file__).resolve().parents[2] / "docs/audits/aquaponics_system_refactor"
     permissions = [{"code": c, "resource": r, "action": a} for c, r, a in _0047_permission_rbac.PERMISSIONS]
     (out / "permissions.json").write_text(json.dumps({"permissions": permissions}, ensure_ascii=False, indent=2) + "\n")
-    (out / "roles.json").write_text(json.dumps({"roles": [{"code": c} for c in ("ADMIN", "OWNER", "TECHNICIAN", "VIEWER")]}, indent=2) + "\n")
+    (out / "roles.json").write_text(json.dumps({"roles": [{"code": c} for c in ("ADMIN", "OWNER", "VIEWER")]}, indent=2) + "\n")
 
 
 if __name__ == "__main__":

@@ -1,10 +1,9 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ClipboardCopy, ExternalLink, Globe2 } from "lucide-react";
+import { Globe2 } from "lucide-react";
 import { useParams } from "react-router-dom";
 import { toast } from "sonner";
 import { projectNotificationApi } from "@/entities/project-notification/api/project-notification-api";
-import { getRemoteMonitoringRuntime } from "@/entities/project-notification/api/remote-monitoring-runtime";
 import type { PublicSettings } from "@/entities/project-notification/model/types";
 import { useProtectedQueryScope } from "@/features/auth/model/use-protected-query-scope";
 import { formatBackendError } from "@/shared/api/backend-error";
@@ -65,14 +64,6 @@ function PublicSettingsForm({
   onSaved: (value: typeof initial) => void;
 }) {
   const [enabled, setEnabled] = useState(initial.enabled);
-  const runtime = useQuery({
-    queryKey: ["remote-monitoring-runtime"],
-    queryFn: getRemoteMonitoringRuntime,
-    retry: false,
-    refetchInterval: 5_000,
-  });
-  const tunnelUrl = runtime.data?.status === "running" ? runtime.data.url : "";
-  const tunnelCommand = "cloudflared tunnel --url http://127.0.0.1:8088";
   const mutation = useMutation({
     mutationFn: () =>
       projectNotificationApi.updatePublicSettings(projectId, {
@@ -90,19 +81,19 @@ function PublicSettingsForm({
       <div>
         <h2 className="text-2xl font-bold">Cài đặt dự án</h2>
         <p className="text-sm text-muted-foreground">
-          Quản lý màn hình giám sát chỉ đọc được chia sẻ qua Cloudflare Quick Tunnel.
+          Quản lý trạng thái cho phép đọc dữ liệu công khai của dự án qua hạ tầng hiện tại.
         </p>
       </div>
       <Card>
         <CardHeader>
-          <CardTitle>Theo dõi từ xa</CardTitle>
+          <CardTitle>Theo dõi công khai</CardTitle>
           <CardDescription>
-            Cho phép xem màn hình Giám sát của dự án từ Internet ở chế độ chỉ đọc.
+            Cho phép dữ liệu giám sát công khai ở chế độ chỉ đọc, không tạo gateway hoặc tunnel riêng.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-5">
           <div className="flex items-center justify-between gap-4">
-            <Label htmlFor="public-enabled">Bật theo dõi từ xa</Label>
+            <Label htmlFor="public-enabled">Bật theo dõi công khai</Label>
             <Switch
               id="public-enabled"
               checked={enabled}
@@ -117,35 +108,6 @@ function PublicSettingsForm({
             <div><p className="font-medium">Có thể xem</p><p className="text-muted-foreground">Thiết bị, cảm biến, năng lượng, biểu đồ và cảnh báo</p></div>
             <div><p className="font-medium">Không thể</p><p className="text-muted-foreground">Điều khiển, cấu hình, MQTT, thành viên hoặc Telegram</p></div>
           </div>
-          {initial.enabled ? <div className="space-y-3 rounded-md border p-4">
-            <div aria-live="polite">
-              <p className="font-medium">Cloudflare Quick Tunnel</p>
-              <p className="text-sm text-muted-foreground">
-                {tunnelUrl ? `Đang hoạt động: ${tunnelUrl}` : "Tunnel chưa chạy. Khởi động trên máy chủ bằng lệnh dưới đây."}
-              </p>
-            </div>
-            <code className="block overflow-x-auto rounded bg-muted px-3 py-2 text-xs">{tunnelCommand}</code>
-            <div className="flex flex-wrap gap-2">
-              <Button type="button" variant="outline" onClick={() => {
-                void navigator.clipboard.writeText(tunnelCommand).then(
-                  () => toast.success("Đã sao chép lệnh Cloudflare Quick Tunnel"),
-                  () => toast.error("Không thể sao chép lệnh"),
-                )
-              }}>
-                <ClipboardCopy aria-hidden="true" />Sao chép lệnh chạy tunnel
-              </Button>
-              {tunnelUrl ? <Button asChild variant="outline">
-                <a href={tunnelUrl} target="_blank" rel="noreferrer">
-                  Mở giám sát từ xa
-                  <ExternalLink aria-hidden="true" />
-                </a>
-              </Button> : <Button type="button" variant="outline" disabled aria-describedby="tunnel-unavailable">
-                Mở giám sát từ xa
-                <ExternalLink aria-hidden="true" />
-              </Button>}
-            </div>
-            {!tunnelUrl ? <p id="tunnel-unavailable" className="text-xs text-muted-foreground">Nút mở sẽ khả dụng tự động khi script nhận được URL `trycloudflare.com`.</p> : null}
-          </div> : null}
         </CardContent>
         <CardFooter>
           <Button

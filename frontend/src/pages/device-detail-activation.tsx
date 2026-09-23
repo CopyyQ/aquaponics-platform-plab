@@ -11,17 +11,21 @@ import {
   Trash2,
 } from "lucide-react";
 import { Link, useNavigate, useParams } from "react-router-dom";
+import { toast } from "sonner";
 import {
   createActuator,
+  createCommand,
   createSensor,
   deleteDevice,
   exportMqttConfig,
   getDevice,
   getMonitoringLatest,
+  listActuatorCommands,
   listActuatorModels,
   listSensorModels,
   queryKeys,
   updateDevice,
+  updateSensor,
 } from "@/api/resources";
 import type {
   ActuatorInput,
@@ -32,6 +36,10 @@ import type {
 } from "@/api/contracts";
 import { errorMessage } from "@/api/client";
 import { useAuth } from "@/app/auth";
+import { ProjectScenarioList } from "@/features/manage-project-scenarios/components/ProjectScenarioList";
+import { actuatorCommandAvailability } from "@/features/manage-actuator/model/actuator-control-policy";
+import { waitForActuatorCommandFeedback } from "@/features/manage-actuator/model/actuator-command-feedback";
+import { runtimeRefetchInterval } from "@/features/manage-actuator/model/device-runtime-refresh";
 import {
   actuatorStateLabel,
   desiredStateValueLabel,
@@ -79,16 +87,23 @@ export function DeviceDetailCanonicalPage() {
   const [editDraft, setEditDraft] = useState<DeviceUpdate>({});
   const [sensorOpen, setSensorOpen] = useState(false);
   const [actuatorOpen, setActuatorOpen] = useState(false);
+  const [pendingActuatorCommands, setPendingActuatorCommands] = useState<
+    Record<string, boolean | undefined>
+  >({});
 
   const device = useQuery({
     queryKey: queryKeys.device(systemId, deviceId),
     queryFn: () => getDevice(systemId, deviceId),
     enabled: validIds,
+    refetchInterval: () => runtimeRefetchInterval(document.visibilityState),
+    refetchOnWindowFocus: true,
   });
   const monitoring = useQuery({
     queryKey: queryKeys.monitoringLatest(systemId),
     queryFn: () => getMonitoringLatest(systemId),
     enabled: validIds && can("monitoring.read"),
+    refetchInterval: () => runtimeRefetchInterval(document.visibilityState),
+    refetchOnWindowFocus: true,
   });
   const sensorModels = useQuery({
     queryKey: queryKeys.sensorModels,
@@ -119,6 +134,9 @@ export function DeviceDetailCanonicalPage() {
       }),
       client.invalidateQueries({ queryKey: queryKeys.devices(systemId) }),
       client.invalidateQueries({
+        queryKey: queryKeys.projectScenarios(systemId, deviceId),
+      }),
+      client.invalidateQueries({
         queryKey: queryKeys.monitoringLatest(systemId),
       }),
       client.invalidateQueries({ queryKey: queryKeys.scada(systemId) }),
@@ -146,12 +164,74 @@ export function DeviceDetailCanonicalPage() {
       setSensorOpen(false);
     },
   });
+  const sensorLifecycle = useMutation({
+    mutationFn: ({
+      sensorId,
+      isEnabled,
+    }: {
+      sensorId: string;
+      isEnabled: boolean;
+    }) => updateSensor(systemId, deviceId, sensorId, { is_enabled: isEnabled }),
+    onSuccess: refresh,
+  });
   const actuatorCreation = useMutation({
     mutationFn: (payload: ActuatorInput) =>
       createActuator(systemId, deviceId, payload),
     onSuccess: async () => {
       await refresh();
       setActuatorOpen(false);
+    },
+  });
+  const actuatorCommand = useMutation({
+    mutationFn: async ({
+      actuatorId,
+      desiredState,
+    }: {
+      actuatorId: string;
+      actuatorName: string;
+      desiredState: boolean;
+    }) => {
+      const command = await createCommand(systemId, deviceId, actuatorId, {
+        desired_state: desiredState,
+      });
+      await waitForActuatorCommandFeedback({
+        commandId: command.command_id,
+        desiredState,
+        readCommands: () =>
+          listActuatorCommands(systemId, deviceId, actuatorId, 10),
+      });
+      return command;
+    },
+    onMutate: ({ actuatorId, actuatorName, desiredState }) => {
+      setPendingActuatorCommands((current) => ({
+        ...current,
+        [actuatorId]: desiredState,
+      }));
+      toast.loading(
+        `${actuatorName}: đang chờ thiết bị phản hồi lệnh ${desiredState ? "bật" : "tắt"}...`,
+        { id: `actuator-command-${actuatorId}` },
+      );
+    },
+    onSuccess: async (_command, { actuatorId, actuatorName, desiredState }) => {
+      await refresh();
+      toast.success(
+        `${actuatorName} đã ${desiredState ? "bật" : "tắt"} thành công`,
+        { id: `actuator-command-${actuatorId}` },
+      );
+    },
+    onError: (error, { actuatorId, actuatorName }) => {
+      void refresh();
+      const message = error instanceof Error ? error.message : errorMessage(error);
+      toast.error(`${actuatorName}: ${message}`, {
+        id: `actuator-command-${actuatorId}`,
+      });
+    },
+    onSettled: (_data, _error, { actuatorId }) => {
+      setPendingActuatorCommands((current) => {
+        const next = { ...current };
+        delete next[actuatorId];
+        return next;
+      });
     },
   });
   const downloadMqtt = async () => {
@@ -198,6 +278,11 @@ export function DeviceDetailCanonicalPage() {
   );
   const measurementCards =
     monitored?.sensors.filter((sensor) => sensor.latest !== null) ?? [];
+  const orderedActuators = [...value.actuators].sort((left, right) => {
+    const leftOrder = left.actuator_model_id ?? Number.MAX_SAFE_INTEGER;
+    const rightOrder = right.actuator_model_id ?? Number.MAX_SAFE_INTEGER;
+    return leftOrder - rightOrder || left.code.localeCompare(right.code);
+  });
 
   return (
     <div className="space-y-6">
@@ -424,21 +509,63 @@ export function DeviceDetailCanonicalPage() {
           }
         >
           {value.sensors.length ? (
-            value.sensors.map((sensor) => (
-              <Link
-                key={sensor.id}
-                className="flex items-center justify-between rounded-xl border p-4 transition-colors hover:border-primary"
-                to={`/aquaponics-systems/${systemId}/devices/${deviceId}/sensors/${sensor.id}`}
-              >
-                <div>
-                  <p className="font-medium">{sensor.name}</p>
-                  <p className="text-xs text-muted-foreground">
-                    {sensor.code} · Model #{sensor.sensor_model_id}
-                  </p>
+            value.sensors.map((sensor) => {
+              const sensorPending =
+                sensorLifecycle.isPending &&
+                sensorLifecycle.variables?.sensorId === sensor.id;
+              return (
+                <div
+                  key={sensor.id}
+                  className="rounded-xl border p-4 transition-colors hover:border-primary"
+                >
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <div>
+                      <Link
+                        className="font-medium hover:underline"
+                        to={`/aquaponics-systems/${systemId}/devices/${deviceId}/sensors/${sensor.id}`}
+                      >
+                        {sensor.name}
+                      </Link>
+                      <p className="text-xs text-muted-foreground">
+                        {sensor.code} · Model #{sensor.sensor_model_id}
+                      </p>
+                      <p className="mt-1 text-xs text-muted-foreground">
+                        {sensor.is_enabled ? "Đang bật" : "Đã tắt"}
+                      </p>
+                    </div>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <StatusBadge value={sensor.status} />
+                      {can("sensors.update") ? (
+                        <Button
+                          size="sm"
+                          variant={sensor.is_enabled ? "outline" : "default"}
+                          disabled={sensorPending}
+                          aria-label={`${sensor.is_enabled ? "Tắt" : "Bật"} cảm biến ${sensor.name}`}
+                          onClick={() =>
+                            sensorLifecycle.mutate({
+                              sensorId: sensor.id,
+                              isEnabled: !sensor.is_enabled,
+                            })
+                          }
+                        >
+                          {sensorPending
+                            ? "Đang cập nhật..."
+                            : sensor.is_enabled
+                              ? "Tắt cảm biến"
+                              : "Bật cảm biến"}
+                        </Button>
+                      ) : null}
+                    </div>
+                  </div>
+                  {sensorLifecycle.isError &&
+                  sensorLifecycle.variables?.sensorId === sensor.id ? (
+                    <p role="alert" className="mt-2 text-xs text-destructive">
+                      {errorMessage(sensorLifecycle.error)}
+                    </p>
+                  ) : null}
                 </div>
-                <StatusBadge value={sensor.status} />
-              </Link>
-            ))
+              );
+            })
           ) : (
             <EmptyState
               icon={Activity}
@@ -477,8 +604,8 @@ export function DeviceDetailCanonicalPage() {
             ) : null
           }
         >
-          {value.actuators.length ? (
-            value.actuators.map((actuator) => {
+          {orderedActuators.length ? (
+            orderedActuators.map((actuator) => {
               const runtime = monitored?.actuators.find(
                 (item) => item.id === actuator.id,
               );
@@ -486,15 +613,32 @@ export function DeviceDetailCanonicalPage() {
                 actuator.desired_state,
                 actuator.reported_state,
               );
+              const connectionStatus =
+                runtime?.connection_status ?? value.status;
+              const pendingDesiredState = pendingActuatorCommands[actuator.id];
+              const commandPending = pendingDesiredState !== undefined;
+              const commandAvailability = actuatorCommandAvailability({
+                connectionStatus,
+                isEnabled: actuator.is_enabled,
+                commandPending,
+                desiredState: actuator.desired_state,
+                reportedState: actuator.reported_state,
+                hasActiveAlert: Boolean(runtime?.active_alert),
+              });
+              const controlsDisabled = !commandAvailability.allowed;
               return (
-                <Link
+                <div
                   key={actuator.id}
-                  className="block rounded-xl border p-4 transition-colors hover:border-primary"
-                  to={`/aquaponics-systems/${systemId}/devices/${deviceId}/actuators/${actuator.id}`}
+                  className="rounded-xl border p-4"
                 >
                   <div className="flex items-start justify-between gap-3">
                     <div>
-                      <p className="font-medium">{actuator.name}</p>
+                      <Link
+                        className="font-medium hover:underline"
+                        to={`/aquaponics-systems/${systemId}/devices/${deviceId}/actuators/${actuator.id}`}
+                      >
+                        {actuator.name}
+                      </Link>
                       <p className="text-xs text-muted-foreground">
                         {actuator.code} ·{" "}
                         {actuator.actuator_model_id
@@ -507,21 +651,21 @@ export function DeviceDetailCanonicalPage() {
                     />
                   </div>
                   <dl className="mt-3 grid grid-cols-[minmax(0,1fr)_auto] gap-x-4 gap-y-1 text-sm">
-                    <dt className="text-muted-foreground">Trạng thái</dt>
+                    <dt className="text-muted-foreground">Trạng thái báo về gần nhất</dt>
                     <dd>{actuatorStateLabel(actuator.reported_state)}</dd>
-                    <dt className="text-muted-foreground">Điện áp</dt>
+                    <dt className="text-muted-foreground">Điện áp đo được</dt>
                     <dd className="tabular-nums">
                       {actuator.voltage_v == null
                         ? "—"
                         : `${actuator.voltage_v} V`}
                     </dd>
-                    <dt className="text-muted-foreground">Dòng điện</dt>
+                    <dt className="text-muted-foreground">Dòng điện đo được</dt>
                     <dd className="tabular-nums">
                       {actuator.current_a == null
                         ? "—"
                         : `${actuator.current_a} A`}
                     </dd>
-                    <dt className="text-muted-foreground">Yêu cầu</dt>
+                    <dt className="text-muted-foreground">Yêu cầu gần nhất</dt>
                     <dd>{desiredStateValueLabel(actuator.desired_state)}</dd>
                   </dl>
                   <p
@@ -529,8 +673,87 @@ export function DeviceDetailCanonicalPage() {
                   >
                     {sync === "Chưa đồng bộ" ? "⚠ " : ""}
                     {sync}
+                    {runtime?.last_reported_at
+                      ? ` · Phản hồi cuối ${new Date(runtime.last_reported_at).toLocaleString("vi-VN")}`
+                      : ""}
                   </p>
-                </Link>
+                  {runtime?.active_alert ? (
+                    <div
+                      role="alert"
+                      className="mt-3 rounded-lg border border-amber-300 bg-amber-50 p-3 text-xs text-amber-900"
+                    >
+                      <p className="font-medium">
+                        ⚠ {runtime.active_alert.rule_name}
+                      </p>
+                      <p className="mt-1">
+                        {runtime.active_alert.condition_summary}
+                      </p>
+                      <p className="mt-1 text-amber-800">
+                        Cảnh báo điện/trạng thái không khóa điều khiển. Hệ thống
+                        vẫn cho phép gửi lại lệnh và chỉ xác nhận thành công khi
+                        thiết bị ACK đúng trạng thái.
+                      </p>
+                    </div>
+                  ) : null}
+                  {can("actuators.commands.create") ? (
+                    <div className="mt-3 flex flex-wrap items-center gap-2 border-t pt-3">
+                      <Button
+                        size="sm"
+                        aria-label={`Gửi lệnh bật ${actuator.name}`}
+                        disabled={controlsDisabled}
+                        onClick={() =>
+                          actuatorCommand.mutate({
+                            actuatorId: actuator.id,
+                            actuatorName: actuator.name,
+                            desiredState: true,
+                          })
+                        }
+                      >
+                        {commandPending && pendingDesiredState === true
+                          ? "Đang chờ phản hồi..."
+                          : "Bật"}
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        aria-label={`Gửi lệnh tắt ${actuator.name}`}
+                        disabled={controlsDisabled}
+                        onClick={() =>
+                          actuatorCommand.mutate({
+                            actuatorId: actuator.id,
+                            actuatorName: actuator.name,
+                            desiredState: false,
+                          })
+                        }
+                      >
+                        {commandPending && pendingDesiredState === false
+                          ? "Đang chờ phản hồi..."
+                          : "Tắt"}
+                      </Button>
+                      <Link
+                        className="ml-auto text-sm text-primary hover:underline"
+                        to={`/aquaponics-systems/${systemId}/devices/${deviceId}/actuators/${actuator.id}`}
+                      >
+                        Xem chi tiết
+                      </Link>
+                    </div>
+                  ) : (
+                    <Link
+                      className="mt-3 inline-block text-sm text-primary hover:underline"
+                      to={`/aquaponics-systems/${systemId}/devices/${deviceId}/actuators/${actuator.id}`}
+                    >
+                      Xem chi tiết
+                    </Link>
+                  )}
+                  {actuatorCommand.isError &&
+                  actuatorCommand.variables?.actuatorId === actuator.id ? (
+                    <p role="alert" className="mt-2 text-xs text-destructive">
+                      {actuatorCommand.error instanceof Error
+                        ? actuatorCommand.error.message
+                        : errorMessage(actuatorCommand.error)}
+                    </p>
+                  ) : null}
+                </div>
               );
             })
           ) : (
@@ -542,6 +765,15 @@ export function DeviceDetailCanonicalPage() {
           )}
         </ResourceCard>
       </div>
+
+      <ProjectScenarioList
+        systemId={systemId}
+        deviceId={deviceId}
+        canCreate={can("project_scenarios.create")}
+        canUpdate={can("project_scenarios.update")}
+        canDelete={can("project_scenarios.delete")}
+        canActivate={can("project_scenarios.activate")}
+      />
     </div>
   );
 }

@@ -1,10 +1,11 @@
-import { useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { ArrowLeft, ExternalLink, KeyRound, LogOut, Plus, Settings, UserRound } from "lucide-react"
 import { Link, useParams } from "react-router-dom"
 import {
-  createUserAquaponicsSystem, forceLogoutUser, getUser, listRoles,
-  listUserAquaponicsSystems, queryKeys, setManagedUserPassword, updateManagedUser, userLifecycle,
+  createUserAquaponicsSystem, forceLogoutUser, getUser, listDeviceTemplates, listRoles,
+  listScenarioCatalogs, listUserAquaponicsSystems, queryKeys, setManagedUserPassword,
+  updateManagedUser, userLifecycle,
 } from "@/api/resources"
 import type { UserStatus } from "@/api/contracts"
 import { errorMessage } from "@/api/client"
@@ -62,13 +63,28 @@ export function UserDetailPage() {
 function UserAquaponicsSystems({ userId, canManage }: { userId: string; canManage: boolean }) {
   const client = useQueryClient()
   const [createOpen, setCreateOpen] = useState(false)
-  const [name, setName] = useState("")
+  const [templateId, setTemplateId] = useState(0)
+  const [scenarioCatalogId, setScenarioCatalogId] = useState(0)
   const systems = useQuery({ queryKey: queryKeys.userSystems(userId), queryFn: () => listUserAquaponicsSystems(userId) })
+  const templates = useQuery({ queryKey: queryKeys.templates, queryFn: listDeviceTemplates, enabled: createOpen })
+  const scenarios = useQuery({ queryKey: queryKeys.scenarioCatalogsByTemplate(templateId), queryFn: () => listScenarioCatalogs(templateId), enabled: createOpen && templateId > 0 })
+  const availableScenarios = useMemo(() => (scenarios.data ?? []).filter((scenario) => scenario.device_template_id === templateId && scenario.is_active), [scenarios.data, templateId])
+  useEffect(() => {
+    if (!createOpen) return
+    if (!templateId) {
+      setTemplateId(templates.data?.find((item) => item.is_active)?.id ?? 0)
+      setScenarioCatalogId(0)
+      return
+    }
+    if (!availableScenarios.some((scenario) => scenario.id === scenarioCatalogId)) {
+      setScenarioCatalogId(availableScenarios[0]?.id ?? 0)
+    }
+  }, [availableScenarios, createOpen, scenarioCatalogId, templateId, templates.data])
   const refresh = async () => { await Promise.all([client.invalidateQueries({ queryKey: queryKeys.userSystems(userId) }), client.invalidateQueries({ queryKey: queryKeys.systems })]) }
-  const creation = useMutation({ mutationFn: () => createUserAquaponicsSystem(userId, name.trim()), onSuccess: async () => { await refresh(); setCreateOpen(false); setName(""); toast.success("Đã tạo Hệ thống Aquaponics") }, onError: (error) => toast.error(errorMessage(error)) })
-  return <Card><CardHeader className="flex-row items-center justify-between gap-3"><CardTitle className="text-balance">Hệ thống Aquaponics sở hữu</CardTitle>{canManage ? <Button onClick={() => setCreateOpen(true)}><Plus />Thêm Hệ thống Aquaponics</Button> : null}</CardHeader><CardContent>
+  const creation = useMutation({ mutationFn: () => createUserAquaponicsSystem(userId, { device_template_id: templateId, scenario_catalog_id: scenarioCatalogId }), onSuccess: async () => { await refresh(); setCreateOpen(false); toast.success("Đã tạo Hệ thống Aquaponics") }, onError: (error) => toast.error(errorMessage(error)) })
+  return <Card><CardHeader className="flex-row items-center justify-between gap-3"><div><CardTitle className="text-balance">Hệ thống Aquaponics sở hữu</CardTitle><p className="mt-1 text-sm text-muted-foreground">Mỗi người dùng chỉ được sở hữu một dự án.</p></div>{canManage && !systems.data?.length ? <Button onClick={() => setCreateOpen(true)}><Plus />Tạo Hệ thống Aquaponics</Button> : null}</CardHeader><CardContent>
     {systems.isLoading ? <Skeleton className="h-36" /> : systems.isError ? <EmptyState icon={UserRound} title="Không thể tải Hệ thống Aquaponics" description={errorMessage(systems.error)} /> : systems.data?.length ? <div className="grid gap-3 sm:grid-cols-2">{systems.data.map((system) => <article key={system.id} className="rounded-lg border p-4"><div className="flex items-start justify-between gap-3"><div className="min-w-0"><h3 className="text-pretty font-semibold">{system.name}</h3><p className="mt-1 text-sm text-muted-foreground">Mã hệ thống: <span className="font-mono">{system.code}</span></p></div><StatusBadge value={system.status} /></div><p className="mt-3 text-sm font-medium">Chủ hệ thống</p><div className="mt-4"><Button asChild size="sm" variant="outline"><Link to={`/aquaponics-systems/${system.id}`}><ExternalLink />Xem hệ thống</Link></Button></div></article>)}</div> : <EmptyState icon={UserRound} title="Chưa sở hữu Hệ thống Aquaponics" description="Tạo Hệ thống Aquaponics đầu tiên cho tài khoản này." />}
-    <Dialog open={createOpen} onOpenChange={setCreateOpen}><DialogContent><DialogHeader><DialogTitle>Thêm Hệ thống Aquaponics</DialogTitle><DialogDescription>Mã hệ thống sẽ được tạo tự động và tài khoản này sẽ là chủ sở hữu.</DialogDescription></DialogHeader><form className="space-y-4" onSubmit={(event) => { event.preventDefault(); creation.mutate() }}><div><Label htmlFor="owned-system-name">Tên hệ thống</Label><Input id="owned-system-name" className="mt-1" value={name} onChange={(event) => setName(event.target.value)} required minLength={2} maxLength={255} autoFocus /></div>{creation.isError ? <p role="alert" className="text-sm text-destructive">{errorMessage(creation.error)}</p> : null}<DialogFooter><Button type="button" variant="outline" onClick={() => setCreateOpen(false)}>Hủy</Button><Button type="submit" disabled={name.trim().length < 2 || creation.isPending}>Tạo hệ thống</Button></DialogFooter></form></DialogContent></Dialog>
+    <Dialog open={createOpen} onOpenChange={setCreateOpen}><DialogContent><DialogHeader><DialogTitle>Tạo Hệ thống Aquaponics</DialogTitle><DialogDescription>Tên dự án được cố định là “Hệ thống Aquaponics”. Chọn thiết bị trước, sau đó chọn một kịch bản thuộc chính thiết bị đó.</DialogDescription></DialogHeader><form className="space-y-4" onSubmit={(event) => { event.preventDefault(); creation.mutate() }}><div><Label htmlFor="owned-system-name">Tên hệ thống</Label><Input id="owned-system-name" className="mt-1" value="Hệ thống Aquaponics" disabled /></div><div><Label>Mẫu thiết bị</Label><Select value={templateId ? String(templateId) : ""} onValueChange={(value) => { setTemplateId(Number(value)); setScenarioCatalogId(0) }}><SelectTrigger className="mt-1"><SelectValue placeholder="Chọn mẫu thiết bị" /></SelectTrigger><SelectContent>{(templates.data ?? []).filter((item) => item.is_active).map((item) => <SelectItem key={item.id} value={String(item.id)}>{item.name} · {item.sensors.length} cảm biến · {item.actuators.length} cơ cấu</SelectItem>)}</SelectContent></Select></div><div><Label>Kịch bản của thiết bị</Label><Select value={scenarioCatalogId ? String(scenarioCatalogId) : ""} onValueChange={(value) => setScenarioCatalogId(Number(value))} disabled={!templateId || scenarios.isLoading}><SelectTrigger className="mt-1"><SelectValue placeholder={templateId ? "Chọn kịch bản của thiết bị" : "Chọn thiết bị trước"} /></SelectTrigger><SelectContent>{availableScenarios.map((item) => <SelectItem key={item.id} value={String(item.id)}>{item.name} · {item.items.filter((resource) => resource.target_type === "SENSOR").length} cảm biến · {item.items.filter((resource) => resource.target_type === "ACTUATOR").length} cơ cấu</SelectItem>)}</SelectContent></Select>{templateId && !scenarios.isLoading && !availableScenarios.length ? <p className="mt-1 text-xs text-destructive">Thiết bị này chưa có kịch bản hoạt động. Hãy tạo kịch bản trong Danh mục trước.</p> : null}</div>{creation.isError ? <p role="alert" className="text-sm text-destructive">{errorMessage(creation.error)}</p> : null}<DialogFooter><Button type="button" variant="outline" onClick={() => setCreateOpen(false)}>Hủy</Button><Button type="submit" disabled={!templateId || !scenarioCatalogId || creation.isPending}>Tạo hệ thống</Button></DialogFooter></form></DialogContent></Dialog>
   </CardContent></Card>
 }
 

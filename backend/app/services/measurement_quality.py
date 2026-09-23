@@ -5,25 +5,15 @@ from math import isfinite
 
 ENGINEERING_RANGES: dict[str, tuple[float, float]] = {
     "PH": (0.0, 14.0),
-    "TEMP": (-20.0, 80.0),
     "WATER_TEMPERATURE": (-20.0, 80.0),
-    "TEMPERATURE": (-50.0, 150.0),
     "AIR_TEMPERATURE": (-50.0, 100.0),
     "DO": (0.0, 30.0),
-    "DISSOLVED_OXYGEN": (0.0, 30.0),
-    "EC": (0.0, 100000.0),
     "TDS": (0.0, 100000.0),
     "WATER_LEVEL": (0.0, 100.0),
-    "HUMIDITY": (0.0, 100.0),
     "AIR_HUMIDITY": (0.0, 100.0),
-    "AIR_PRESSURE": (300.0, 1_200.0),
-    "ILLUMINANCE": (0.0, 200000.0),
-    "POWER_W": (0.0, 100000.0),
-    "INPUT_VOLTAGE_V": (0.0, 1000.0),
-    "OUTPUT_VOLTAGE_V": (0.0, 1000.0),
-    "INPUT_CURRENT_A": (0.0, 1000.0),
-    "LOAD_CURRENT_A": (0.0, 1000.0),
-    "ENERGY_TOTAL_WH": (0.0, 1_000_000_000.0),
+    "LIGHT_INTENSITY": (0.0, 200000.0),
+    "VOLTAGE": (0.0, 1000.0),
+    "CURRENT": (0.0, 1000.0),
 }
 
 

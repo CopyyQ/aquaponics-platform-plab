@@ -74,6 +74,8 @@ async def evaluate_sensor_threshold_incident(
     project = await db.get(Project, device.project_id)
     if project is None:
         return None
+    if project.scenario_catalog_id is not None:
+        return None
     active_key_prefix = f"sensor:{sensor.id}:threshold:"
     active_incidents = list(
         (await db.scalars(
@@ -213,6 +215,9 @@ async def evaluate_actuator_composite_incident(
     recorded_at: datetime, received_at: datetime,
 ) -> OperationalIncident | None:
     """Evaluate mutually exclusive ON electrical faults from model capability."""
+    project = await db.get(Project, device.project_id)
+    if project is not None and project.scenario_catalog_id is not None:
+        return None
     model = None
     if actuator.actuator_model_id is not None:
         from app.models.actuator_model import ActuatorModel
@@ -359,6 +364,9 @@ async def evaluate_actuator_threshold_incident(
     value: float | None, recorded_at: datetime, received_at: datetime,
 ) -> OperationalIncident | None:
     """Evaluate one direct Actuator electrical metric from its canonical config."""
+    project = await db.get(Project, device.project_id)
+    if project is not None and project.scenario_catalog_id is not None:
+        return None
     config = await get_actuator_threshold_alert_config(db, actuator.id, metric_type)
     if config is None or not config.enabled:
         return None
@@ -581,7 +589,11 @@ async def _transition_sensor_incident(
     # Simple Sensor lower/upper meaning belongs exclusively to
     # ThresholdAlertConfig. Keep advanced rule evaluators available, but make
     # a future accidental caller unable to create a second semantic Incident.
-    if rule.evaluator_type in SIMPLE_SENSOR_THRESHOLD_EVALUATORS and rule.code.startswith("CATALOG_"):
+    if (
+        project.scenario_catalog_id is None
+        and rule.evaluator_type in SIMPLE_SENSOR_THRESHOLD_EVALUATORS
+        and rule.code.startswith("CATALOG_")
+    ):
         canonical_config = await get_sensor_threshold_alert_config(db, sensor.id)
         if canonical_config is not None:
             return None
@@ -735,10 +747,20 @@ def _inside_hysteresis(config: dict[str, Any], observed: float) -> bool:
     return False
 
 
+def canonical_notification_event_type(event_type: str) -> str | None:
+    """Reduce the internal incident lifecycle to the two Telegram events."""
+    if event_type == "OPEN":
+        return "OPEN"
+    if event_type in {"RECOVERED", "RESOLVED"}:
+        return "RECOVERED"
+    return None
+
+
 async def _enqueue(db: AsyncSession, incident: OperationalIncident, event_type: str, snapshot: dict[str, Any]) -> None:
+    event_type = canonical_notification_event_type(event_type)
+    if event_type is None:
+        return
     key = f"incident:{incident.id}:{event_type}"
-    if event_type == "ESCALATED":
-        key = f"{key}:{incident.business_risk_level_snapshot}"
     event_at = incident.resolved_at or incident.last_triggered_at
     duration_seconds = max(0, int((event_at - incident.started_at).total_seconds()))
     await db.execute(

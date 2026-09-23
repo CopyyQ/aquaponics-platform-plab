@@ -6,7 +6,6 @@ export interface ActuatorModel {
   data_type: "BOOLEAN"
   default_state: boolean
   is_active: boolean
-  sort_order: number
   is_deleted: boolean
   created_at: string
   updated_at: string

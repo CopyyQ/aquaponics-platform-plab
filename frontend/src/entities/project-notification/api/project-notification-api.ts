@@ -4,7 +4,7 @@ import { httpClient } from "@/shared/api/http-client"
 export const projectNotificationApi = {
   deliveryHistory: async () => (await httpClient.get<NotificationDelivery[]>("/admin/notification-deliveries/history")).data,
   get: async (projectId: number) => (await httpClient.get<NotificationSettings>(`/projects/${projectId}/notification-settings`)).data,
-  update: async (projectId: number, payload: Omit<NotificationSettings, "telegram_bot_configured" | "recipients">) => (await httpClient.put<NotificationSettings>(`/projects/${projectId}/notification-settings`, payload)).data,
+  update: async (projectId: number, payload: Pick<NotificationSettings, "telegram_enabled" | "notify_alert_recovered">) => (await httpClient.put<NotificationSettings>(`/projects/${projectId}/notification-settings`, payload)).data,
   createRecipient: async (projectId: number, payload: { name: string; telegram_chat_id: string; enabled?: boolean }) => (await httpClient.post<NotificationRecipient>(`/projects/${projectId}/notification-recipients`, payload)).data,
   updateRecipient: async (projectId: number, recipientId: number, payload: Partial<Pick<NotificationRecipient, "name" | "telegram_chat_id" | "enabled">>) => (await httpClient.patch<NotificationRecipient>(`/projects/${projectId}/notification-recipients/${recipientId}`, payload)).data,
   removeRecipient: async (projectId: number, recipientId: number) => { await httpClient.delete(`/projects/${projectId}/notification-recipients/${recipientId}`) },

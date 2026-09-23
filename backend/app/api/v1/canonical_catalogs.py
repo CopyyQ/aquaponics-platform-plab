@@ -3,7 +3,7 @@
 from datetime import datetime
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -11,12 +11,31 @@ from sqlalchemy.orm import selectinload
 
 from app.api.deps import require_permission
 from app.core.enums import UserStatus
+from app.core.exceptions import InternalInvariantError
 from app.db.session import get_db
 from app.models.actuator_model import ActuatorModel
 from app.models.device_template import DeviceTemplate, DeviceTemplateActuator, DeviceTemplateSensor
 from app.models.sensor_model import SensorModel
+from app.models.scenario_catalog import ScenarioCatalog, ScenarioCatalogItem
 from app.models.user import User
+from app.schemas.scenario_catalog import (
+    ScenarioCatalogCreate,
+    ScenarioCatalogItemRead,
+    ScenarioCatalogItemUpdate,
+    ScenarioCatalogRead,
+    ScenarioCatalogUpdate,
+)
 from app.services.public_identity_service import PublicIdentityNotFoundError, get_user_by_public_id
+from app.services.scenario_catalog_service import (
+    ScenarioCatalogError,
+    create_scenario_catalog,
+    delete_scenario_catalog,
+    get_scenario_catalog,
+    list_scenario_catalogs,
+    sync_scenario_catalogs_for_template,
+    update_scenario_catalog,
+    update_scenario_catalog_item,
+)
 
 router = APIRouter()
 
@@ -39,7 +58,6 @@ class TemplateSensorSlotCreate(BaseModel):
     model_config = ConfigDict(extra="forbid")
     sensor_model_id: int = Field(gt=0)
     code: str = Field(min_length=2, max_length=80)
-    sort_order: int = 0
     is_required: bool = False
 
 
@@ -47,7 +65,6 @@ class TemplateSensorSlotUpdate(BaseModel):
     model_config = ConfigDict(extra="forbid")
     sensor_model_id: int | None = Field(default=None, gt=0)
     code: str | None = Field(default=None, min_length=2, max_length=80)
-    sort_order: int | None = None
     is_required: bool | None = None
 
 
@@ -58,7 +75,6 @@ class TemplateSensorSlotRead(BaseModel):
     code: str
     sensor_model_id: int
     sensor_model_name: str
-    sort_order: int
     is_required: bool
 
 
@@ -66,7 +82,6 @@ class TemplateActuatorSlotCreate(BaseModel):
     model_config = ConfigDict(extra="forbid")
     actuator_model_id: int = Field(gt=0)
     code: str = Field(pattern=r"^[A-Z0-9_-]+$", min_length=2, max_length=80)
-    sort_order: int = 0
     is_required: bool = False
 
 
@@ -74,7 +89,6 @@ class TemplateActuatorSlotUpdate(BaseModel):
     model_config = ConfigDict(extra="forbid")
     actuator_model_id: int | None = Field(default=None, gt=0)
     code: str | None = Field(default=None, pattern=r"^[A-Z0-9_-]+$", min_length=2, max_length=80)
-    sort_order: int | None = None
     is_required: bool | None = None
 
 
@@ -84,7 +98,6 @@ class TemplateActuatorSlotRead(BaseModel):
     code: str
     actuator_model_id: int
     actuator_model_name: str
-    sort_order: int
     is_required: bool
 
 
@@ -102,7 +115,6 @@ class ActuatorModelCreate(BaseModel):
     description: str | None = None
     data_type: str = "BOOLEAN"
     default_state: bool = False
-    sort_order: int = 0
     nominal_voltage_v: float | None = Field(default=None, gt=0)
     voltage_tolerance_v: float | None = Field(default=None, ge=0)
     zero_voltage_max_v: float | None = Field(default=None, ge=0)
@@ -116,7 +128,6 @@ class ActuatorModelUpdate(BaseModel):
     description: str | None = None
     data_type: str | None = None
     default_state: bool | None = None
-    sort_order: int | None = None
     is_active: bool | None = None
     nominal_voltage_v: float | None = Field(default=None, gt=0)
     voltage_tolerance_v: float | None = Field(default=None, ge=0)
@@ -151,13 +162,13 @@ class UserRead(BaseModel):
 def _sensor_slot(row: DeviceTemplateSensor) -> TemplateSensorSlotRead:
     return TemplateSensorSlotRead(id=row.id, template_id=row.device_template_id, code=row.code,
         sensor_model_id=row.sensor_model_id, sensor_model_name=row.sensor_model.name,
-        sort_order=row.sort_order, is_required=row.is_required)
+        is_required=row.is_required)
 
 
 def _actuator_slot(row: DeviceTemplateActuator) -> TemplateActuatorSlotRead:
     return TemplateActuatorSlotRead(id=row.id, template_id=row.device_template_id, code=row.code,
         actuator_model_id=row.actuator_model_id, actuator_model_name=row.actuator_model.name,
-        sort_order=row.sort_order, is_required=row.is_required)
+        is_required=row.is_required)
 
 
 def _template_read(row: DeviceTemplate) -> DeviceTemplateRead:
@@ -171,6 +182,49 @@ def _user_read(row: User) -> UserRead:
         phone_number=row.phone_number, role_id=row.role_id, role_code=row.role.code if row.role else None,
         role_name=row.role.name if row.role else None, status=row.status, last_login_at=row.last_login_at,
         created_at=row.created_at, updated_at=row.updated_at)
+
+
+def _scenario_item_read(row: ScenarioCatalogItem) -> ScenarioCatalogItemRead:
+    model = row.sensor_model if row.target_type == "SENSOR" else row.actuator_model
+    if model is None:
+        raise InternalInvariantError(
+            "SCENARIO_CATALOG_ITEM_CORRUPT",
+            "Scenario catalog item is missing its target model",
+        )
+    return ScenarioCatalogItemRead(
+        id=row.id,
+        target_type=row.target_type,
+        resource_code=row.resource_code,
+        sensor_model_id=row.sensor_model_id,
+        actuator_model_id=row.actuator_model_id,
+        model_code=model.code,
+        model_name=model.name,
+        name=row.name,
+        is_enabled=row.is_enabled,
+        branches=row.branches or [],
+        source_reference=row.source_reference,
+        notes=row.notes,
+    )
+
+
+def _scenario_catalog_read(row: ScenarioCatalog) -> ScenarioCatalogRead:
+    return ScenarioCatalogRead(
+        id=row.id,
+        public_id=row.public_id,
+        device_template_id=row.device_template_id,
+        code=row.code,
+        name=row.name,
+        description=row.description,
+        is_active=row.is_active,
+        items=[_scenario_item_read(item) for item in row.items],
+    )
+
+
+def _scenario_error(exc: ScenarioCatalogError) -> HTTPException:
+    return HTTPException(
+        exc.status_code,
+        {"code": exc.code, "detail": exc.message},
+    )
 
 
 async def _template(db: AsyncSession, template_id: int) -> DeviceTemplate:
@@ -205,6 +259,89 @@ async def get_user(user_id: UUID, db: AsyncSession = Depends(get_db), _: User = 
         raise HTTPException(404, str(exc)) from exc
     await db.refresh(row, attribute_names=["role"])
     return _user_read(row)
+
+
+@router.get("/scenario-catalogs", response_model=list[ScenarioCatalogRead], tags=["Scenario Catalogs"])
+async def list_scenario_catalog_api(
+    device_template_id: int | None = Query(default=None, gt=0),
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(require_permission("device_templates.read")),
+) -> list[ScenarioCatalogRead]:
+    return [
+        _scenario_catalog_read(row)
+        for row in await list_scenario_catalogs(db, device_template_id=device_template_id)
+    ]
+
+
+@router.post("/scenario-catalogs", response_model=ScenarioCatalogRead, status_code=201, tags=["Scenario Catalogs"])
+async def create_scenario_catalog_api(
+    payload: ScenarioCatalogCreate,
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(require_permission("device_templates.create")),
+) -> ScenarioCatalogRead:
+    try:
+        return _scenario_catalog_read(await create_scenario_catalog(db, payload))
+    except ScenarioCatalogError as exc:
+        raise _scenario_error(exc) from exc
+
+
+@router.get("/scenario-catalogs/{catalog_id}", response_model=ScenarioCatalogRead, tags=["Scenario Catalogs"])
+async def get_scenario_catalog_api(
+    catalog_id: int,
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(require_permission("device_templates.read")),
+) -> ScenarioCatalogRead:
+    try:
+        return _scenario_catalog_read(await get_scenario_catalog(db, catalog_id))
+    except ScenarioCatalogError as exc:
+        raise _scenario_error(exc) from exc
+
+
+@router.patch("/scenario-catalogs/{catalog_id}", response_model=ScenarioCatalogRead, tags=["Scenario Catalogs"])
+async def update_scenario_catalog_api(
+    catalog_id: int,
+    payload: ScenarioCatalogUpdate,
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(require_permission("device_templates.update")),
+) -> ScenarioCatalogRead:
+    try:
+        return _scenario_catalog_read(
+            await update_scenario_catalog(db, catalog_id, payload)
+        )
+    except ScenarioCatalogError as exc:
+        raise _scenario_error(exc) from exc
+
+
+@router.delete("/scenario-catalogs/{catalog_id}", status_code=204, tags=["Scenario Catalogs"])
+async def delete_scenario_catalog_api(
+    catalog_id: int,
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(require_permission("device_templates.delete")),
+) -> None:
+    try:
+        await delete_scenario_catalog(db, catalog_id)
+    except ScenarioCatalogError as exc:
+        raise _scenario_error(exc) from exc
+
+
+@router.patch(
+    "/scenario-catalogs/{catalog_id}/items/{item_id}",
+    response_model=ScenarioCatalogItemRead,
+    tags=["Scenario Catalogs"],
+)
+async def update_scenario_catalog_item_api(
+    catalog_id: int,
+    item_id: int,
+    payload: ScenarioCatalogItemUpdate,
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(require_permission("device_templates.update")),
+) -> ScenarioCatalogItemRead:
+    try:
+        return _scenario_item_read(
+            await update_scenario_catalog_item(db, catalog_id, item_id, payload)
+        )
+    except ScenarioCatalogError as exc:
+        raise _scenario_error(exc) from exc
 
 
 @router.get("/device-templates", response_model=list[DeviceTemplateRead], tags=["Device Templates"])
@@ -246,7 +383,9 @@ async def list_template_sensors(template_id: int, db: AsyncSession = Depends(get
 async def add_template_sensor(template_id: int, payload: TemplateSensorSlotCreate, db: AsyncSession = Depends(get_db), _: User = Depends(require_permission("device_templates.update"))) -> TemplateSensorSlotRead:
     await _template(db, template_id)
     if await db.get(SensorModel, payload.sensor_model_id) is None: raise HTTPException(422, "SensorModel không tồn tại")
-    row = DeviceTemplateSensor(device_template_id=template_id, **payload.model_dump()); db.add(row); await db.commit()
+    row = DeviceTemplateSensor(device_template_id=template_id, **payload.model_dump()); db.add(row); await db.flush()
+    await sync_scenario_catalogs_for_template(db, template_id)
+    await db.commit()
     return _sensor_slot(await _sensor_mapping(db, template_id, row.id))
 
 
@@ -259,12 +398,16 @@ async def get_template_sensor(template_id: int, mapping_id: int, db: AsyncSessio
 async def update_template_sensor(template_id: int, mapping_id: int, payload: TemplateSensorSlotUpdate, db: AsyncSession = Depends(get_db), _: User = Depends(require_permission("device_templates.update"))) -> TemplateSensorSlotRead:
     row = await _sensor_mapping(db, template_id, mapping_id)
     for key, value in payload.model_dump(exclude_unset=True).items(): setattr(row, key, value)
+    await db.flush()
+    await sync_scenario_catalogs_for_template(db, template_id)
     await db.commit(); return _sensor_slot(await _sensor_mapping(db, template_id, mapping_id))
 
 
 @router.delete("/device-templates/{template_id}/sensors/{mapping_id}", status_code=204, tags=["Device Templates"])
 async def delete_template_sensor(template_id: int, mapping_id: int, db: AsyncSession = Depends(get_db), _: User = Depends(require_permission("device_templates.update"))) -> None:
-    await db.delete(await _sensor_mapping(db, template_id, mapping_id)); await db.commit()
+    await db.delete(await _sensor_mapping(db, template_id, mapping_id)); await db.flush()
+    await sync_scenario_catalogs_for_template(db, template_id)
+    await db.commit()
 
 
 @router.get("/device-templates/{template_id}/actuators", response_model=list[TemplateActuatorSlotRead], tags=["Device Templates"])
@@ -276,7 +419,9 @@ async def list_template_actuators(template_id: int, db: AsyncSession = Depends(g
 async def add_template_actuator(template_id: int, payload: TemplateActuatorSlotCreate, db: AsyncSession = Depends(get_db), _: User = Depends(require_permission("device_templates.update"))) -> TemplateActuatorSlotRead:
     await _template(db, template_id)
     if await db.get(ActuatorModel, payload.actuator_model_id) is None: raise HTTPException(422, "ActuatorModel không tồn tại")
-    row = DeviceTemplateActuator(device_template_id=template_id, **payload.model_dump()); db.add(row); await db.commit()
+    row = DeviceTemplateActuator(device_template_id=template_id, **payload.model_dump()); db.add(row); await db.flush()
+    await sync_scenario_catalogs_for_template(db, template_id)
+    await db.commit()
     return _actuator_slot(await _actuator_mapping(db, template_id, row.id))
 
 
@@ -290,12 +435,16 @@ async def update_template_actuator(template_id: int, mapping_id: int, payload: T
     row = await _actuator_mapping(db, template_id, mapping_id)
     for key, value in payload.model_dump(exclude_unset=True).items():
         setattr(row, key, value)
+    await db.flush()
+    await sync_scenario_catalogs_for_template(db, template_id)
     await db.commit(); return _actuator_slot(await _actuator_mapping(db, template_id, mapping_id))
 
 
 @router.delete("/device-templates/{template_id}/actuators/{mapping_id}", status_code=204, tags=["Device Templates"])
 async def delete_template_actuator(template_id: int, mapping_id: int, db: AsyncSession = Depends(get_db), _: User = Depends(require_permission("device_templates.update"))) -> None:
-    await db.delete(await _actuator_mapping(db, template_id, mapping_id)); await db.commit()
+    await db.delete(await _actuator_mapping(db, template_id, mapping_id)); await db.flush()
+    await sync_scenario_catalogs_for_template(db, template_id)
+    await db.commit()
 
 
 @router.get("/actuator-models", response_model=list[ActuatorModelRead], tags=["Actuator Models"])

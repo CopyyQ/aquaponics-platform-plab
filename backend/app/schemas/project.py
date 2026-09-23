@@ -1,10 +1,11 @@
 from datetime import datetime
+from typing import Literal
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from app.schemas.device import DeviceRead
 from app.core.enums import DeviceStatus, ProjectStatus, SensorStatus
+from app.schemas.device import DeviceRead
 
 
 class ProjectCreate(BaseModel):
@@ -118,7 +119,21 @@ class DeviceConfigMqtt(BaseModel):
 class DeviceConfigTopics(BaseModel):
     telemetry: str
     status: str
-    command: str
+    commands: str
+    command_ack: str
+
+
+class DeviceConfigActuatorStateEncoding(BaseModel):
+    off: bool = False
+    on: bool = True
+
+
+class DeviceConfigActuatorControl(BaseModel):
+    capability: Literal["ON_OFF"] = "ON_OFF"
+    state_encoding: DeviceConfigActuatorStateEncoding = Field(
+        default_factory=DeviceConfigActuatorStateEncoding
+    )
+    ack_required: bool = True
 
 
 class DeviceConfigSensor(BaseModel):
@@ -137,6 +152,9 @@ class DeviceConfigActuator(BaseModel):
     name: str
     actuator_model_code: str | None
     is_enabled: bool
+    control: DeviceConfigActuatorControl = Field(
+        default_factory=DeviceConfigActuatorControl
+    )
 
 
 class DeviceConfigDevice(BaseModel):

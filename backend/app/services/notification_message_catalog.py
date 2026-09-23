@@ -35,12 +35,12 @@ CATALOG: dict[str, AlertMessage] = {
 # Wording may vary by Actuator type, but this never changes the semantic
 # condition selected by the single composite evaluator.
 ACTUATOR_TITLES: dict[tuple[str, str], str] = {
-    ("ACTUATOR_ON_NO_POWER", "AIR_PUMP"): "Máy sủi đang được bật nhưng không có nguồn điện",
-    ("ACTUATOR_ON_NO_LOAD", "AIR_PUMP"): "Máy sủi có điện nhưng tải có khả năng không hoạt động",
+    ("ACTUATOR_ON_NO_POWER", "AERATION_PUMP"): "Máy sủi đang được bật nhưng không có nguồn điện",
+    ("ACTUATOR_ON_NO_LOAD", "AERATION_PUMP"): "Máy sủi có điện nhưng tải có khả năng không hoạt động",
     ("ACTUATOR_ON_NO_POWER", "FISH_TANK_PUMP"): "Bơm bể cá đang được bật nhưng không có nguồn điện",
     ("ACTUATOR_ON_NO_LOAD", "FISH_TANK_PUMP"): "Bơm bể cá có điện nhưng tải có khả năng không hoạt động",
-    ("ACTUATOR_ON_NO_POWER", "IRRIGATION_PUMP"): "Bơm tưới đang được bật nhưng không có nguồn điện",
-    ("ACTUATOR_ON_NO_LOAD", "IRRIGATION_PUMP"): "Bơm tưới có điện nhưng tải có khả năng không hoạt động",
+    ("ACTUATOR_ON_NO_POWER", "BIOFILTER_PUMP"): "Bơm bể lọc vi sinh đang được bật nhưng không có nguồn điện",
+    ("ACTUATOR_ON_NO_LOAD", "BIOFILTER_PUMP"): "Bơm bể lọc vi sinh có điện nhưng tải có khả năng không hoạt động",
 }
 
 
@@ -48,7 +48,7 @@ def sensor_condition_key(model_code: str, direction: str) -> str:
     code = model_code.upper()
     if code == "PH":
         return "SENSOR_PH_LOW" if direction == "BELOW" else "SENSOR_PH_HIGH"
-    if code in {"TEMP", "WATER_TEMPERATURE"} and direction == "ABOVE":
+    if code == "WATER_TEMPERATURE" and direction == "ABOVE":
         return "SENSOR_WATER_TEMPERATURE_HIGH"
     if code == "TDS" and direction == "BELOW":
         return "SENSOR_TDS_LOW"

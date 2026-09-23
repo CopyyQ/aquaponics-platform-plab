@@ -4,7 +4,6 @@ from enum import StrEnum
 class UserRole(StrEnum):
     ADMIN = "ADMIN"
     OWNER = "OWNER"
-    TECHNICIAN = "TECHNICIAN"
     VIEWER = "VIEWER"
 
 
@@ -17,8 +16,6 @@ class UserStatus(StrEnum):
 
 class AquaponicsSystemStatus(StrEnum):
     ACTIVE = "ACTIVE"
-    INACTIVE = "INACTIVE"
-    ARCHIVED = "ARCHIVED"
     DISABLED = "DISABLED"
 
 

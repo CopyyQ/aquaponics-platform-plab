@@ -1,23 +1,50 @@
-import axios from "axios"
+import axios, { type InternalAxiosRequestConfig } from "axios"
+
+import {
+  ACCESS_TOKEN_STORAGE_KEY,
+  refreshAccessToken,
+  shouldAttemptAuthRefresh,
+  signalAuthenticationExpired,
+} from "@/shared/api/auth-refresh"
 
 const configuredBase = import.meta.env.VITE_API_BASE_URL?.trim() || "/api/v1"
 export const apiBaseUrl = configuredBase.endsWith("/api/v1") ? configuredBase : `${configuredBase.replace(/\/$/, "")}/api/v1`
 
-export const api = axios.create({ baseURL: apiBaseUrl, timeout: 20_000 })
+type RetriableRequestConfig = InternalAxiosRequestConfig & { _authRetried?: boolean }
+
+export const api = axios.create({
+  baseURL: apiBaseUrl,
+  timeout: 20_000,
+  withCredentials: true,
+})
 
 api.interceptors.request.use((config) => {
-  const token = localStorage.getItem("aquaponics_access_token")
+  const token = localStorage.getItem(ACCESS_TOKEN_STORAGE_KEY)
   if (token) config.headers.Authorization = `Bearer ${token}`
   return config
 })
 
 api.interceptors.response.use(
   (response) => response,
-  (error) => {
-    if (error.response?.status === 401) {
-      localStorage.removeItem("aquaponics_access_token")
-      window.dispatchEvent(new Event("aquaponics-auth-expired"))
+  async (error) => {
+    const request = error.config as RetriableRequestConfig | undefined
+    const canRefresh = error.response?.status === 401
+      && request
+      && !request._authRetried
+      && shouldAttemptAuthRefresh(request.url)
+
+    if (canRefresh) {
+      request._authRetried = true
+      try {
+        const token = await refreshAccessToken()
+        request.headers.Authorization = `Bearer ${token}`
+        return await api.request(request)
+      } catch (refreshError) {
+        signalAuthenticationExpired()
+        return Promise.reject(refreshError)
+      }
     }
+
     return Promise.reject(error)
   },
 )

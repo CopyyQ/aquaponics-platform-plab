@@ -1,6 +1,7 @@
+from datetime import UTC, datetime
 from uuid import UUID
 
-from fastapi import Depends, HTTPException, Request, status
+from fastapi import Depends, Request
 from fastapi.security import (
     HTTPAuthorizationCredentials,
     HTTPBearer,
@@ -8,37 +9,37 @@ from fastapi.security import (
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db.session import get_db
 from app.core.enums import UserStatus
+from app.core.exceptions import ApplicationError
 from app.core.security import decode_access_token
+from app.db.session import get_db
+from app.models.auth_session import UserSession
 from app.models.user import User
 from app.services.permission_service import has_permission
-from app.services.public_identity_service import PublicIdentityNotFoundError, get_system_by_public_id
+from app.services.public_identity_service import (
+    PublicIdentityNotFoundError,
+    get_system_by_public_id,
+)
 
 
 bearer_scheme = HTTPBearer(auto_error=False)
 
 
-class AccountAuthError(Exception):
-    def __init__(self, code: str, detail: str) -> None:
-        self.code = code
-        self.detail = detail
-        super().__init__(detail)
-
-
 def _inactive_account_error(
     user: User,
-) -> AccountAuthError:
+) -> ApplicationError:
     if user.status == UserStatus.DISABLED:
-        return AccountAuthError(
+        return ApplicationError(
             "ACCOUNT_DISABLED",
             "Tài khoản đã bị vô hiệu hóa.",
+            401,
         )
 
     if user.status == UserStatus.LOCKED:
-        return AccountAuthError(
+        return ApplicationError(
             "ACCOUNT_LOCKED",
             "Tài khoản đang bị khóa.",
+            401,
         )
 
     if (
@@ -46,14 +47,16 @@ def _inactive_account_error(
         or user.is_deleted
         or user.deleted_at is not None
     ):
-        return AccountAuthError(
+        return ApplicationError(
             "ACCOUNT_DELETED",
             "Tài khoản đã bị xóa.",
+            401,
         )
 
-    return AccountAuthError(
+    return ApplicationError(
         "ACCOUNT_INACTIVE",
         "Tài khoản đã bị vô hiệu hóa hoặc khóa.",
+        401,
     )
 
 
@@ -64,17 +67,18 @@ async def get_current_user(
     db: AsyncSession = Depends(get_db),
 ) -> User:
     if credentials is None:
-        raise AccountAuthError(
+        raise ApplicationError(
             "AUTHENTICATION_REQUIRED",
             "Chưa đăng nhập.",
+            401,
         )
 
     try:
         payload = decode_access_token(
             credentials.credentials
         )
-
         user_id = int(payload["sub"])
+        session_id = UUID(str(payload["sid"]))
         token_version = int(
             payload.get("token_version", -1)
         )
@@ -83,23 +87,31 @@ async def get_current_user(
         KeyError,
         TypeError,
     ) as exc:
-        raise AccountAuthError(
+        raise ApplicationError(
             "INVALID_TOKEN",
             "Token không hợp lệ hoặc đã hết hạn.",
+            401,
         ) from exc
 
-    user = await db.scalar(
-        select(User).where(
-            User.id == user_id
+    row = (
+        await db.execute(
+            select(User, UserSession)
+            .join(UserSession, UserSession.user_id == User.id)
+            .where(
+                User.id == user_id,
+                UserSession.public_id == session_id,
+            )
         )
-    )
+    ).one_or_none()
 
-    if user is None:
-        raise AccountAuthError(
-            "ACCOUNT_DELETED",
-            "Tài khoản không còn tồn tại.",
+    if row is None:
+        raise ApplicationError(
+            "TOKEN_REVOKED",
+            "Phiên đăng nhập đã hết hiệu lực.",
+            401,
         )
 
+    user, auth_session = row
     if (
         user.status != UserStatus.ACTIVE
         or user.is_deleted
@@ -107,10 +119,15 @@ async def get_current_user(
     ):
         raise _inactive_account_error(user)
 
-    if user.token_version != token_version:
-        raise AccountAuthError(
+    if (
+        user.token_version != token_version
+        or auth_session.revoked_at is not None
+        or auth_session.expires_at <= datetime.now(UTC)
+    ):
+        raise ApplicationError(
             "TOKEN_REVOKED",
             "Phiên đăng nhập đã hết hiệu lực.",
+            401,
         )
 
     return user
@@ -135,15 +152,10 @@ async def get_current_operational_user(
     ),
 ) -> User:
     if user.must_change_password:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail={
-                "code": "PASSWORD_CHANGE_REQUIRED",
-                "detail": (
-                    "Bạn phải thay đổi mật khẩu "
-                    "trước khi tiếp tục."
-                ),
-            },
+        raise ApplicationError(
+            "PASSWORD_CHANGE_REQUIRED",
+            "Bạn phải thay đổi mật khẩu trước khi tiếp tục.",
+            403,
         )
 
     return user
@@ -163,18 +175,30 @@ def require_permission(permission_code: str):
         system_id = None
         if raw_system_id is not None:
             try:
-                system = await get_system_by_public_id(db, UUID(str(raw_system_id)))
-            except (ValueError, PublicIdentityNotFoundError) as exc:
-                raise HTTPException(status_code=404, detail="Aquaponics System không tồn tại") from exc
+                system = await get_system_by_public_id(
+                    db,
+                    UUID(str(raw_system_id)),
+                )
+            except (
+                ValueError,
+                PublicIdentityNotFoundError,
+            ) as exc:
+                raise ApplicationError(
+                    "AQUAPONICS_SYSTEM_NOT_FOUND",
+                    "Aquaponics System không tồn tại",
+                    404,
+                ) from exc
             system_id = system.id
-        if not await has_permission(db, user, permission_code, system_id):
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail={
-                    "code": "PERMISSION_REQUIRED",
-                    "permission": permission_code,
-                    "detail": "Tài khoản không có quyền thực hiện thao tác này.",
-                },
+        if not await has_permission(
+            db,
+            user,
+            permission_code,
+            system_id,
+        ):
+            raise ApplicationError(
+                "PERMISSION_REQUIRED",
+                "Tài khoản không có quyền thực hiện thao tác này.",
+                403,
             )
         return user
 

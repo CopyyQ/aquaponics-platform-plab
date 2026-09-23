@@ -1,8 +1,7 @@
 export type Id = number;
 export type PublicId = string;
 export type DateTime = string;
-export type AquaponicsSystemStatus =
-  "ACTIVE" | "INACTIVE" | "ARCHIVED" | "DISABLED";
+export type AquaponicsSystemStatus = "ACTIVE" | "DISABLED";
 export type AlertResourceType = "SENSOR" | "ACTUATOR";
 export type AlertDirection = "BELOW" | "ABOVE";
 export type AlertLifecycleStatus =
@@ -69,10 +68,16 @@ export interface UserAquaponicsSystem {
   code: string;
   name: string;
   owner_user_id: PublicId;
+  device_template_id: Id | null;
+  scenario_catalog_id: Id | null;
   location: string | null;
   status: string;
   role: "OWNER";
   relationship: "OWNER";
+}
+export interface UserAquaponicsSystemCreate {
+  device_template_id: Id;
+  scenario_catalog_id: Id;
 }
 export interface UserSelfUpdate {
   full_name?: string | null;
@@ -93,13 +98,16 @@ export interface AquaponicsSystem {
   location: string | null;
   description: string | null;
   owner_user_id: PublicId;
+  device_template_id: Id | null;
+  scenario_catalog_id: Id | null;
   status: AquaponicsSystemStatus;
   disabled_at?: DateTime | null;
   disabled_reason?: string | null;
 }
 export interface AquaponicsSystemCreate {
-  name: string;
   owner_user_id: PublicId;
+  device_template_id: Id;
+  scenario_catalog_id: Id;
 }
 export interface AquaponicsSystemUpdate {
   name?: string | null;
@@ -251,46 +259,117 @@ export interface ThresholdAlertConfigInput {
   above_recommended_actions?: string | null;
   delay_seconds?: number;
 }
-export interface AlertScenarioRange {
-  min: number | null;
-  max: number | null;
-}
-export interface AlertScenario {
+
+
+export interface ProjectScenarioResource {
   id: PublicId;
+  code: string;
   name: string;
-  target_type: "SENSOR" | "ACTUATOR";
-  evaluator_type: string;
+  model_id: number | null;
   is_enabled: boolean;
-  risk_level: RiskLevel;
+}
+
+export interface ProjectScenarioBranch {
+  id: PublicId;
+  branch_key: string;
+  name: string;
+  evaluator_type: string;
+  condition_config: Record<string, unknown>;
   duration_seconds: number;
-  message: string | null;
+  business_risk_level: RiskLevel;
+  message_template: string | null;
   consequence: string | null;
   recommended_action: string | null;
-  condition: {
-    range_mode?: "INSIDE_RANGE" | "OUTSIDE_RANGE";
-    range?: AlertScenarioRange;
-    reported_state?: boolean | null;
-    voltage?: AlertScenarioRange | null;
-    current?: AlertScenarioRange | null;
-    duration_seconds: number;
-  };
+  is_enabled: boolean;
+  position: number;
   created_at: DateTime;
   updated_at: DateTime;
 }
-export interface AlertScenarioInput {
+
+export interface ProjectScenarioItem {
+  id: PublicId;
+  target_type: "SENSOR" | "ACTUATOR";
+  resource: ProjectScenarioResource;
   name: string;
+  is_enabled: boolean;
+  branches: ProjectScenarioBranch[];
+}
+
+export interface ProjectScenarioSummary {
+  id: PublicId;
+  name: string;
+  description: string | null;
+  is_active: boolean;
+  sensor_count: number;
+  actuator_count: number;
+  source_scenario_catalog_id: number | null;
+  cloned_from_scenario_id: PublicId | null;
+  created_at: DateTime;
+  updated_at: DateTime;
+}
+
+export interface ProjectScenarioDetail extends ProjectScenarioSummary {
+  sensors: ProjectScenarioItem[];
+  actuators: ProjectScenarioItem[];
+}
+
+export interface ProjectScenarioCreate {
+  name: string;
+  description?: string | null;
+  clone_from_scenario_id?: PublicId | null;
+}
+
+export interface ProjectScenarioUpdate {
+  name?: string;
+  description?: string | null;
+}
+
+export interface ProjectScenarioCloneRequest {
+  name: string;
+  description?: string | null;
+}
+
+export interface ProjectScenarioItemUpdate {
+  name?: string;
   is_enabled?: boolean;
-  risk_level: RiskLevel;
-  duration_seconds: number;
-  message?: string | null;
+  notes?: string | null;
+}
+
+export interface ProjectScenarioBranchCreate {
+  branch_key?: string | null;
+  name: string;
+  evaluator_type: string;
+  condition_config: Record<string, unknown>;
+  duration_seconds?: number;
+  business_risk_level: RiskLevel;
+  message_template?: string | null;
   consequence?: string | null;
   recommended_action?: string | null;
-  range_mode?: "INSIDE_RANGE" | "OUTSIDE_RANGE" | null;
-  range?: AlertScenarioRange | null;
-  reported_state?: boolean | null;
-  voltage?: AlertScenarioRange | null;
-  current?: AlertScenarioRange | null;
+  is_enabled?: boolean;
+  position?: number;
 }
+
+export interface ProjectScenarioBranchUpdate {
+  name?: string;
+  evaluator_type?: string;
+  condition_config?: Record<string, unknown>;
+  duration_seconds?: number;
+  business_risk_level?: RiskLevel;
+  message_template?: string | null;
+  consequence?: string | null;
+  recommended_action?: string | null;
+  is_enabled?: boolean;
+  position?: number;
+}
+
+export interface ProjectScenarioActivationResult {
+  scenario: ProjectScenarioSummary;
+  previous_scenario_id: PublicId | null;
+  closed_incident_count: number;
+  reevaluated_sensor_count: number;
+  reevaluated_actuator_count: number;
+}
+
 
 export interface Alert {
   id: Id;
@@ -545,25 +624,87 @@ export interface DeviceTemplateUpdate {
   description?: string | null;
   is_active?: boolean | null;
 }
+
+export type ScenarioEvaluatorType =
+  | "THRESHOLD"
+  | "THRESHOLD_BANDS"
+  | "RANGE_BANDS"
+  | "DIGITAL_STATE"
+  | "THRESHOLD_DURATION"
+  | "BASELINE_DEVIATION"
+  | "WINDOW_DURATION"
+  | "TREND"
+  | "MULTI_CONDITION";
+
+export interface ScenarioCatalogBranch {
+  key: string;
+  label: string;
+  enabled: boolean;
+  evaluator_type: ScenarioEvaluatorType;
+  condition_config: Record<string, unknown>;
+  risk_level: RiskLevel;
+  message: string | null;
+  consequence: string | null;
+  recommended_action: string | null;
+}
+export interface ScenarioCatalogItem {
+  id: Id;
+  target_type: "SENSOR" | "ACTUATOR";
+  resource_code: string;
+  sensor_model_id: Id | null;
+  actuator_model_id: Id | null;
+  model_code: string;
+  model_name: string;
+  name: string;
+  is_enabled: boolean;
+  branches: ScenarioCatalogBranch[];
+  source_reference: string;
+  notes: string | null;
+}
+export interface ScenarioCatalog {
+  id: Id;
+  public_id: PublicId;
+  device_template_id: Id;
+  code: string;
+  name: string;
+  description: string | null;
+  is_active: boolean;
+  items: ScenarioCatalogItem[];
+}
+export interface ScenarioCatalogInput {
+  device_template_id: Id;
+  code: string;
+  name: string;
+  description?: string | null;
+}
+export interface ScenarioCatalogUpdate {
+  name?: string | null;
+  description?: string | null;
+  is_active?: boolean | null;
+}
+export interface ScenarioCatalogItemUpdate {
+  name?: string | null;
+  is_enabled?: boolean | null;
+  branches?: ScenarioCatalogBranch[] | null;
+  notes?: string | null;
+}
+
 export interface TemplateSensorSlot {
   id: Id;
   template_id: Id;
   code: string;
   sensor_model_id: Id;
   sensor_model_name: string;
-  sort_order: number;
   is_required: boolean;
 }
 export interface TemplateSensorSlotInput {
   sensor_model_id: Id;
   code: string;
-  sort_order?: number;
   is_required?: boolean;
 }
 export interface TemplateSensorSlotUpdate {
   sensor_model_id?: Id | null;
   code?: string | null;
-  sort_order?: number | null;
   is_required?: boolean | null;
 }
 export interface TemplateActuatorSlot {
@@ -572,19 +713,16 @@ export interface TemplateActuatorSlot {
   code: string;
   actuator_model_id: Id;
   actuator_model_name: string;
-  sort_order: number;
   is_required: boolean;
 }
 export interface TemplateActuatorSlotInput {
   actuator_model_id: Id;
   code: string;
-  sort_order?: number;
   is_required?: boolean;
 }
 export interface TemplateActuatorSlotUpdate {
   actuator_model_id?: Id | null;
   code?: string | null;
-  sort_order?: number | null;
   is_required?: boolean | null;
 }
 export interface SensorModel {
@@ -627,7 +765,6 @@ export interface ActuatorModel {
   description: string | null;
   data_type: string;
   default_state: boolean;
-  sort_order: number;
   is_active: boolean;
   nominal_voltage_v: number | null;
   voltage_tolerance_v: number | null;
@@ -643,7 +780,6 @@ export interface ActuatorModelInput {
   description?: string | null;
   data_type?: string;
   default_state?: boolean;
-  sort_order?: number;
   nominal_voltage_v?: number | null;
   voltage_tolerance_v?: number | null;
   zero_voltage_max_v?: number | null;
@@ -655,7 +791,6 @@ export interface ActuatorModelUpdate {
   description?: string | null;
   data_type?: string | null;
   default_state?: boolean | null;
-  sort_order?: number | null;
   is_active?: boolean | null;
   nominal_voltage_v?: number | null;
   voltage_tolerance_v?: number | null;
@@ -852,7 +987,8 @@ export interface ScadaLayoutMutationResponse {
 export interface MqttDeviceTopics {
   telemetry: string;
   status: string;
-  command: string;
+  commands: string;
+  command_ack: string;
 }
 export interface MqttDeviceSensor {
   id: PublicId;
@@ -869,6 +1005,11 @@ export interface MqttDeviceActuator {
   name: string;
   actuator_model_code: string | null;
   is_enabled: boolean;
+  control: {
+    capability: "ON_OFF";
+    state_encoding: { off: boolean; on: boolean };
+    ack_required: boolean;
+  };
 }
 export interface MqttDevice {
   id: PublicId;
@@ -929,19 +1070,6 @@ export interface AccountLifecycleRequest {
 export interface SystemLifecycleRequest {
   reason?: string | null;
 }
-export interface NotificationRiskPolicy {
-  risk_level: RiskLevel;
-  telegram_enabled: boolean;
-  notify_on_open: boolean;
-  notify_on_escalation: boolean;
-  notify_on_recovery: boolean;
-  notify_on_resolved: boolean;
-  reminder_enabled: boolean;
-  initial_reminder_seconds: number;
-  repeat_interval_seconds: number;
-  max_reminders: number;
-  stop_reminders_on_ack: boolean;
-}
 export interface AlertDeliveryRecipient {
   id: Id;
   system_id: PublicId;
@@ -952,26 +1080,14 @@ export interface AlertDeliveryRecipient {
   updated_at: DateTime;
 }
 export interface AlertDeliverySettings {
-  enabled: boolean;
-  in_app_enabled: boolean;
   telegram_enabled: boolean;
-  notify_alert_opened: boolean;
-  notify_alert_resolved: boolean;
   notify_alert_recovered: boolean;
-  notify_alert_escalated: boolean;
-  notify_alert_reminder: boolean;
-  reminder_interval_minutes: number | null;
-  minimum_business_risk_level: RiskLevel;
-  risk_extreme_enabled: boolean;
-  risk_very_high_enabled: boolean;
-  risk_high_enabled: boolean;
-  risk_medium_enabled: boolean;
-  risk_low_medium_enabled: boolean;
-  risk_low_enabled: boolean;
-  risk_policies: NotificationRiskPolicy[];
   telegram_bot_configured: boolean;
-  notification_generation: number;
   recipients: AlertDeliveryRecipient[];
+}
+export interface AlertDeliverySettingsUpdate {
+  telegram_enabled: boolean;
+  notify_alert_recovered: boolean;
 }
 export interface AlertDeliveryRecipientInput {
   name: string;
@@ -1006,9 +1122,4 @@ export interface AlertDeliveryHistoryItem {
   sent_at: DateTime | null;
   created_at: DateTime;
   reason: string | null;
-}
-export interface PublicMonitoringSettings {
-  enabled: boolean;
-  remote_monitoring_available: boolean;
-  public_slug: string | null;
 }

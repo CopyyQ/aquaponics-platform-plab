@@ -14,8 +14,12 @@ from app.services.actuator_state_service import (
 )
 from app.services.audit_service import write_audit
 from app.services.device_status_service import update_device_status
-from app.services.project_notification_service import dispatch_actuator_command_transition
 from app.services.operational_incident_service import evaluate_alert_scenarios_for_actuator
+from app.services.project_notification_service import dispatch_actuator_command_transition
+from app.services.project_scenario_evaluator import (
+    device_uses_project_scenarios,
+    evaluate_active_actuator_scenario,
+)
 from app.services.telemetry_ingest_service import ingest_mqtt_telemetry
 
 logger = logging.getLogger(__name__)
@@ -101,10 +105,23 @@ async def handle_status(device_code: str, raw_payload: bytes) -> None:
                         current_a=item.current_a, recorded_at=recorded_at,
                         received_at=received_at, quality="VALID",
                     ))
-                await evaluate_alert_scenarios_for_actuator(
-                    db, device=device, actuator=actuator,
-                    recorded_at=item.recorded_at or payload.sent_at, received_at=received_at,
-                )
+                recorded_at = item.recorded_at or payload.sent_at
+                if await device_uses_project_scenarios(db, device_id=device.id):
+                    await evaluate_active_actuator_scenario(
+                        db,
+                        device=device,
+                        actuator=actuator,
+                        recorded_at=recorded_at,
+                        received_at=received_at,
+                    )
+                else:
+                    await evaluate_alert_scenarios_for_actuator(
+                        db,
+                        device=device,
+                        actuator=actuator,
+                        recorded_at=recorded_at,
+                        received_at=received_at,
+                    )
             await db.commit()
         logger.info(
             "event=mqtt_status_processed device_code=%s accepted=%s",
@@ -123,7 +140,17 @@ async def handle_command_ack(device_code: str, raw_payload: bytes) -> None:
         device = await db.scalar(select(Device).where(Device.code == device_code, Device.is_enabled.is_(True), Device.is_deleted.is_(False)))
         if device is None:
             return
-        command = await db.scalar(select(ActuatorCommand).join(Actuator).where(ActuatorCommand.id == payload.command_id, ActuatorCommand.actuator_id == Actuator.id, Actuator.device_id == device.id, Actuator.removed_at.is_(None)))
+        command = await db.scalar(
+            select(ActuatorCommand)
+            .join(Actuator)
+            .where(
+                ActuatorCommand.id == payload.command_id,
+                ActuatorCommand.actuator_id == Actuator.id,
+                Actuator.device_id == device.id,
+                Actuator.removed_at.is_(None),
+            )
+            .with_for_update(of=ActuatorCommand)
+        )
         if command is None:
             logger.warning("event=unknown_ack command_id=%s device_code=%s", payload.command_id, device_code)
             return
@@ -131,7 +158,13 @@ async def handle_command_ack(device_code: str, raw_payload: bytes) -> None:
         if actuator is None or actuator.code != payload.actuator_code:
             logger.warning("event=invalid_ack command_id=%s device_code=%s", payload.command_id, device_code)
             return
-        if command.status == "ACKNOWLEDGED":
+        if command.status not in {"PENDING", "PUBLISHED"}:
+            logger.info(
+                "event=terminal_ack_ignored command_id=%s device_code=%s status=%s",
+                command.id,
+                device_code,
+                command.status,
+            )
             return
         now = datetime.now(UTC)
         command.status = payload.status

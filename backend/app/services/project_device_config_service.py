@@ -1,27 +1,31 @@
 from datetime import UTC, datetime
 
-from fastapi import HTTPException
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.core.enums import UserStatus
-from app.models.device import Device
+from app.core.exceptions import ApplicationError
 from app.models.actuator import Actuator
 from app.models.actuator_model import ActuatorModel
+from app.models.device import Device
 from app.models.project import Project
 from app.models.sensor import Sensor
 from app.models.sensor_model import SensorModel
 from app.models.user import User
 from app.schemas.project import (
-    DeviceConfigDevice,
+    AquaponicsSystemMqttConfigExport,
     DeviceConfigActuator,
-    DeviceConfigMqtt,
     DeviceConfigAquaponicsSystem,
+    DeviceConfigDevice,
+    DeviceConfigMqtt,
     DeviceConfigSensor,
     DeviceConfigTopics,
-    AquaponicsSystemMqttConfigExport,
 )
+
+
+def _device_topic(pattern: str, device_code: str) -> str:
+    return pattern.replace("{device_code}", device_code).replace("+", device_code, 1)
 
 
 async def export_project_device_config(
@@ -39,24 +43,24 @@ async def export_project_device_config(
         )
     ).first()
     if context is None:
-        raise HTTPException(status_code=404, detail="Không tìm thấy dự án")
+        raise ApplicationError(
+            "AQUAPONICS_SYSTEM_NOT_FOUND",
+            "Không tìm thấy dự án",
+            404,
+        )
     project, owner = context
     if owner.status != UserStatus.ACTIVE or owner.is_deleted or owner.deleted_at is not None:
-        raise HTTPException(
-            status_code=409,
-            detail={
-                "code": "PROJECT_OWNER_NOT_ACTIVE",
-                "detail": "Chủ dự án không ở trạng thái hoạt động.",
-            },
+        raise ApplicationError(
+            "PROJECT_OWNER_NOT_ACTIVE",
+            "Chủ dự án không ở trạng thái hoạt động.",
+            409,
         )
     public_host = settings.mqtt_public_host.strip()
     if public_host.lower() in {"localhost", "127.0.0.1", "::1", "mqtt", "mosquitto"}:
-        raise HTTPException(
-            status_code=500,
-            detail={
-                "code": "MQTT_PUBLIC_HOST_INVALID",
-                "detail": "MQTT_PUBLIC_HOST phải là địa chỉ mà thiết bị trong mạng LAN truy cập được.",
-            },
+        raise ApplicationError(
+            "MQTT_PUBLIC_HOST_INVALID",
+            "MQTT_PUBLIC_HOST phải là địa chỉ mà thiết bị trong mạng LAN truy cập được.",
+            500,
         )
     devices = list(
         (
@@ -118,9 +122,10 @@ async def export_project_device_config(
             status=device.status,
             location=device.location,
             topics=DeviceConfigTopics(
-                telemetry=f"aquaponics/{device.code}/telemetry",
-                status=f"aquaponics/{device.code}/status",
-                command=f"aquaponics/{device.code}/command",
+                telemetry=_device_topic(settings.mqtt_telemetry_topic, device.code),
+                status=_device_topic(settings.mqtt_status_topic, device.code),
+                commands=_device_topic(settings.mqtt_command_topic, device.code),
+                command_ack=_device_topic(settings.mqtt_ack_topic, device.code),
             ),
             sensors=sensors_by_device[device.id],
             actuators=actuators_by_device[device.id],

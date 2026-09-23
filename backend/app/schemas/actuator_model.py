@@ -42,7 +42,6 @@ class ActuatorModelRead(BaseModel):
     data_type: str
     default_state: bool
     is_active: bool
-    sort_order: int
     nominal_voltage_v: float | None
     voltage_tolerance_v: float | None
     zero_voltage_max_v: float | None

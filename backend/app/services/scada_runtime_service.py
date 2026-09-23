@@ -100,40 +100,32 @@ def _connectivity(device: Device) -> str:
 def _sensor_symbol_type(code: str) -> str:
     normalized = code.upper()
     mapping = {
+        "NH3": "GENERIC_SENSOR",
+        "NO3": "GENERIC_SENSOR",
         "PH": "PH_SENSOR",
-        "TEMP": "WATER_TEMPERATURE_SENSOR",
-        "WATER_TEMPERATURE": "WATER_TEMPERATURE_SENSOR",
-        "AIR_TEMPERATURE": "ENVIRONMENT_TEMPERATURE_SENSOR",
-        "ENVIRONMENT_TEMPERATURE": "ENVIRONMENT_TEMPERATURE_SENSOR",
-        "AIR_HUMIDITY": "HUMIDITY_SENSOR",
-        "HUMIDITY": "HUMIDITY_SENSOR",
         "DO": "DISSOLVED_OXYGEN_SENSOR",
-        "DISSOLVED_OXYGEN": "DISSOLVED_OXYGEN_SENSOR",
-        "EC": "EC_SENSOR",
         "TDS": "TDS_SENSOR",
-        "TDS_01": "TDS_SENSOR",
+        "WATER_TEMPERATURE": "WATER_TEMPERATURE_SENSOR",
         "WATER_LEVEL": "WATER_LEVEL_SENSOR",
-        "ILLUMINANCE": "LIGHT_SENSOR",
-        "LIGHT": "LIGHT_SENSOR",
-        "AIR_PRESSURE": "AIR_PRESSURE_SENSOR",
+        "AIR_TEMPERATURE": "ENVIRONMENT_TEMPERATURE_SENSOR",
+        "AIR_HUMIDITY": "HUMIDITY_SENSOR",
+        "LIGHT_INTENSITY": "LIGHT_SENSOR",
+        "VOLTAGE": "GENERIC_SENSOR",
+        "CURRENT": "GENERIC_SENSOR",
     }
     return mapping.get(normalized, "GENERIC_SENSOR")
 
 
 def _actuator_symbol_type(code: str | None) -> str:
     normalized = (code or "").upper()
-    if "AIR" in normalized and "PUMP" in normalized:
+    if normalized == "AERATION_PUMP":
         return "AIR_PUMP"
-    if "PUMP" in normalized or "MIST" in normalized:
+    if normalized in {"FISH_TANK_PUMP", "BIOFILTER_PUMP"}:
         return "WATER_PUMP"
-    if "VALVE" in normalized:
+    if normalized in {"FRESH_WATER_VALVE", "FILTER_DRAIN_VALVE"}:
         return "VALVE"
-    if "FAN" in normalized:
-        return "FAN"
-    if "LIGHT" in normalized:
+    if normalized == "GROW_LIGHT":
         return "GROW_LIGHT"
-    if "HEATER" in normalized:
-        return "HEATER"
     return "GENERIC_ACTUATOR"
 
 

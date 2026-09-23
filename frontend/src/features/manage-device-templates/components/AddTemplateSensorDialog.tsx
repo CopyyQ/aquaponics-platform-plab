@@ -17,16 +17,14 @@ import { formatBackendError } from "@/shared/api/backend-error"
 
 type Props = {
   templateId: number
-  nextOrder: number
   mappedModelIds: number[]
 }
 
-export function AddTemplateSensorDialog({ templateId, nextOrder, mappedModelIds }: Props) {
+export function AddTemplateSensorDialog({ templateId, mappedModelIds }: Props) {
   const [open, setOpen] = useState(false)
   const [search, setSearch] = useState("")
   const [modelId, setModelId] = useState("")
   const [required, setRequired] = useState(false)
-  const [order, setOrder] = useState(nextOrder + 1)
   const [lower, setLower] = useState("")
   const [upper, setUpper] = useState("")
   const [alertsEnabled, setAlertsEnabled] = useState(true)
@@ -41,7 +39,7 @@ export function AddTemplateSensorDialog({ templateId, nextOrder, mappedModelIds 
   const invalidThresholds = lower !== "" && upper !== "" && (!Number.isFinite(Number(lower)) || !Number.isFinite(Number(upper)) || Number(lower) >= Number(upper))
   const mutation = useMutation({
     mutationFn: () => deviceTemplateApi.addSensor(templateId, {
-      sensor_model_id: Number(modelId), sort_order: Math.max(0, order), is_required: required,
+      sensor_model_id: Number(modelId), is_required: required,
       default_lower_threshold: lower === "" ? null : Number(lower),
       default_upper_threshold: upper === "" ? null : Number(upper),
       default_warning_enabled: alertsEnabled,
@@ -50,7 +48,7 @@ export function AddTemplateSensorDialog({ templateId, nextOrder, mappedModelIds 
     }),
     onSuccess: async () => {
       await invalidateQueries.deviceTemplates(client)
-      setSearch(""); setModelId(""); setRequired(false); setOrder(nextOrder + 1); setLower(""); setUpper(""); setAlertsEnabled(true); setBelowMessage(""); setAboveMessage(""); setOpen(false)
+      setSearch(""); setModelId(""); setRequired(false); setLower(""); setUpper(""); setAlertsEnabled(true); setBelowMessage(""); setAboveMessage(""); setOpen(false)
       toast.success("Đã thêm cảm biến vào mẫu")
     },
     onError: (error) => toast.error(formatBackendError(error, "Không thể thêm cảm biến vào mẫu")),
@@ -63,7 +61,6 @@ export function AddTemplateSensorDialog({ templateId, nextOrder, mappedModelIds 
         <div className="flex flex-col gap-2"><Label htmlFor={`sensor-search-${templateId}`}>Tìm Sensor Model</Label><Input id={`sensor-search-${templateId}`} value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Tên, code hoặc đơn vị" /></div>
         <div className="flex flex-col gap-2"><Label>Sensor Model *</Label><Select value={modelId} onValueChange={setModelId} required><SelectTrigger aria-label="Sensor Model"><SelectValue placeholder={models.isLoading ? "Đang tải…" : "Chọn Sensor Model"} /></SelectTrigger><SelectContent><SelectGroup>{available.map((model) => <SelectItem key={model.id} value={String(model.id)}><span className="flex flex-col"><span>{model.name} · {model.code}</span><span className="text-xs text-muted-foreground">{model.unit} · {model.value_type} · {model.measurement_semantics}</span></span></SelectItem>)}</SelectGroup></SelectContent></Select>{!models.isLoading && available.length === 0 ? <p className="text-sm text-muted-foreground">Không còn Sensor Model phù hợp để thêm.</p> : null}</div>
         <div className="flex items-center justify-between gap-3"><Label htmlFor={`required-${templateId}`}>Bắt buộc</Label><Switch id={`required-${templateId}`} checked={required} onCheckedChange={setRequired} /></div>
-        <div className="flex flex-col gap-2"><Label htmlFor={`order-${templateId}`}>Thứ tự hiển thị</Label><Input id={`order-${templateId}`} type="number" min="0" value={order} onChange={(event) => setOrder(Number(event.target.value))} /></div>
         <fieldset className="flex flex-col gap-4 rounded-md border p-4"><legend className="px-1 text-sm font-medium">Giám sát ngưỡng mặc định</legend><div className="flex items-center justify-between gap-3"><div><Label htmlFor={`alerts-enabled-${templateId}`}>Bật cảnh báo</Label><p className="text-xs text-muted-foreground">Áp dụng cho Sensor mới được provision từ mẫu này.</p></div><Switch id={`alerts-enabled-${templateId}`} checked={alertsEnabled} onCheckedChange={setAlertsEnabled} /></div><div className="grid gap-4 sm:grid-cols-2"><div className="flex flex-col gap-2"><Label htmlFor={`lower-${templateId}`}>Ngưỡng dưới</Label><Input id={`lower-${templateId}`} type="number" step="any" value={lower} onChange={(event) => setLower(event.target.value)} /></div><div className="flex flex-col gap-2"><Label htmlFor={`upper-${templateId}`}>Ngưỡng trên</Label><Input id={`upper-${templateId}`} type="number" step="any" aria-invalid={invalidThresholds} aria-describedby={invalidThresholds ? `threshold-error-${templateId}` : undefined} value={upper} onChange={(event) => setUpper(event.target.value)} /></div></div>{invalidThresholds ? <p id={`threshold-error-${templateId}`} className="text-sm text-destructive" aria-live="polite">Ngưỡng dưới phải nhỏ hơn ngưỡng trên.</p> : null}<div className="flex flex-col gap-2"><Label htmlFor={`below-message-${templateId}`}>Nội dung khi thấp hơn ngưỡng</Label><Textarea id={`below-message-${templateId}`} value={belowMessage} onChange={(event) => setBelowMessage(event.target.value)} /></div><div className="flex flex-col gap-2"><Label htmlFor={`above-message-${templateId}`}>Nội dung khi cao hơn ngưỡng</Label><Textarea id={`above-message-${templateId}`} value={aboveMessage} onChange={(event) => setAboveMessage(event.target.value)} /></div></fieldset>
         <DialogFooter><Button type="button" variant="outline" onClick={() => setOpen(false)}>Hủy</Button><Button type="submit" disabled={!modelId || invalidThresholds || mutation.isPending}>{mutation.isPending ? "Đang lưu…" : "Lưu"}</Button></DialogFooter>
       </form>

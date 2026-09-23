@@ -7,6 +7,7 @@ import {
   Eye,
   EyeOff,
   LoaderCircle,
+  LifeBuoy,
   LockKeyhole,
   LogIn,
   UserRound,
@@ -26,6 +27,28 @@ const loginSchema = z.object({
 
 type LoginFormValues = z.infer<typeof loginSchema>
 
+const REMEMBER_PASSWORD_KEY = "aquaponics_remember_password"
+const REMEMBERED_USERNAME_KEY = "aquaponics_remembered_username"
+
+function rememberedLogin() {
+  if (typeof window === "undefined") return { enabled: false, username: "" }
+  const enabled = localStorage.getItem(REMEMBER_PASSWORD_KEY) === "1"
+  return { enabled, username: enabled ? localStorage.getItem(REMEMBERED_USERNAME_KEY) ?? "" : "" }
+}
+
+async function requestBrowserPasswordSave(username: string, password: string) {
+  if (typeof window === "undefined" || typeof navigator === "undefined" || !navigator.credentials?.store) return
+  const PasswordCredentialCtor = (window as typeof window & {
+    PasswordCredential?: new (data: { id: string; name?: string; password: string }) => Credential
+  }).PasswordCredential
+  if (!PasswordCredentialCtor) return
+  try {
+    await navigator.credentials.store(new PasswordCredentialCtor({ id: username, name: username, password }))
+  } catch {
+    // Password persistence is owned by the browser; login must still succeed if it declines.
+  }
+}
+
 function friendlyLoginError(error: unknown): string {
   const message = errorMessage(error)
   if (/401|unauthorized|không chính xác/i.test(message)) return "Tên đăng nhập hoặc mật khẩu không chính xác."
@@ -36,7 +59,10 @@ function friendlyLoginError(error: unknown): string {
 }
 
 export function LoginForm({ onSuccess }: { onSuccess: () => void | Promise<void> }) {
+  const remembered = rememberedLogin()
   const [showPassword, setShowPassword] = useState(false)
+  const [rememberPassword, setRememberPassword] = useState(remembered.enabled)
+  const [showRecoveryHelp, setShowRecoveryHelp] = useState(false)
   const {
     register,
     handleSubmit,
@@ -47,7 +73,7 @@ export function LoginForm({ onSuccess }: { onSuccess: () => void | Promise<void>
     resolver: zodResolver(loginSchema),
     mode: "onSubmit",
     reValidateMode: "onChange",
-    defaultValues: { username: "", password: "" },
+    defaultValues: { username: remembered.username, password: "" },
   })
 
   const usernameRegistration = register("username")
@@ -56,10 +82,19 @@ export function LoginForm({ onSuccess }: { onSuccess: () => void | Promise<void>
   const onSubmit = handleSubmit(async (values) => {
     clearErrors("root")
     try {
-      const result = await loginRequest(values.username.trim(), values.password)
+      const username = values.username.trim()
+      const result = await loginRequest(username, values.password)
       localStorage.setItem("aquaponics_access_token", result.access_token)
+      if (rememberPassword) {
+        localStorage.setItem(REMEMBER_PASSWORD_KEY, "1")
+        localStorage.setItem(REMEMBERED_USERNAME_KEY, username)
+        void requestBrowserPasswordSave(username, values.password)
+      } else {
+        localStorage.removeItem(REMEMBER_PASSWORD_KEY)
+        localStorage.removeItem(REMEMBERED_USERNAME_KEY)
+      }
+      toast.success("Đăng nhập thành công", { description: "Đang chuyển đến trung tâm vận hành.", duration: 4000 })
       await onSuccess()
-      toast.success("Đăng nhập thành công", { description: "Đang chuyển đến trung tâm vận hành." })
     } catch (error) {
       localStorage.removeItem("aquaponics_access_token")
       setError("root", { type: "server", message: friendlyLoginError(error) })
@@ -129,6 +164,42 @@ export function LoginForm({ onSuccess }: { onSuccess: () => void | Promise<void>
           </button>
         </div>
         {errors.password?.message ? <p id="password-error" role="alert" className="text-xs font-medium text-destructive">{errors.password.message}</p> : null}
+      </div>
+
+      <div className="space-y-3">
+        <div className="flex flex-wrap items-center justify-between gap-3 text-sm">
+          <label htmlFor="remember-password" className="inline-flex cursor-pointer items-center gap-2 text-slate-600">
+            <input
+              id="remember-password"
+              type="checkbox"
+              checked={rememberPassword}
+              disabled={isSubmitting}
+              onChange={(event) => setRememberPassword(event.target.checked)}
+              className="size-4 rounded border-slate-300 accent-emerald-700"
+            />
+            <span>Nhớ mật khẩu</span>
+          </label>
+          <button
+            type="button"
+            className="inline-flex items-center gap-1.5 font-medium text-[#08766c] hover:underline"
+            aria-expanded={showRecoveryHelp}
+            aria-controls="password-recovery-help"
+            onClick={() => setShowRecoveryHelp((current) => !current)}
+          >
+            <LifeBuoy aria-hidden="true" className="size-4" />
+            Quên mật khẩu? Liên hệ Quản trị viên
+          </button>
+        </div>
+
+        <p className="text-xs leading-5 text-slate-500">
+          Mật khẩu được lưu bởi trình quản lý mật khẩu của trình duyệt; ứng dụng không lưu mật khẩu thô.
+        </p>
+
+        {showRecoveryHelp ? (
+          <div id="password-recovery-help" className="rounded-xl border border-emerald-200 bg-emerald-50/70 px-4 py-3 text-sm leading-6 text-emerald-950">
+            Liên hệ Quản trị viên PLAB qua kênh nội bộ để được đặt lại mật khẩu. Chỉ cần cung cấp tên đăng nhập, không gửi mật khẩu cũ.
+          </div>
+        ) : null}
       </div>
 
       {errors.root?.message ? (

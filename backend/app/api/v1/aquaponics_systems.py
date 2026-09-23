@@ -10,40 +10,78 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.api.deps import require_permission
-from app.core.enums import ActuatorThresholdMetric, AlertLifecycleStatus, AquaponicsSystemStatus, ThresholdMetricType
+from app.core.enums import (
+    ActuatorThresholdMetric,
+    AlertLifecycleStatus,
+    AquaponicsSystemStatus,
+    UserRole,
+)
 from app.db.session import get_db
 from app.models.actuator import Actuator, ActuatorCommand, ActuatorReading
 from app.models.actuator_model import ActuatorModel
 from app.models.device import Device
-from app.models.device_template import DeviceTemplate, DeviceTemplateActuator, DeviceTemplateSensor
+from app.models.device_template import DeviceTemplate, DeviceTemplateSensor
+from app.models.operational_alert import OperationalIncident
 from app.models.project import Project
+from app.models.project_scenario import ProjectScenario
 from app.models.sensor import Sensor
 from app.models.sensor_model import SensorModel
 from app.models.telemetry import TelemetryReading
-from app.models.operational_alert import OperationalIncident
 from app.models.threshold_alert_config import ThresholdAlertConfig
 from app.models.user import User
+from app.schemas.actuator import ActuatorCommandCreate, ActuatorCommandRead, ActuatorReadingRead
+from app.schemas.alert import AlertRead, AlertResolutionRequest
+from app.schemas.alert_scenario import (
+    AlertScenarioCreate,
+    AlertScenarioRead,
+    AlertScenarioUpdate,
+)
+from app.schemas.project import AquaponicsSystemMqttConfigExport
+from app.schemas.telemetry import TelemetryReadingRead
+from app.schemas.threshold_alert_config import (
+    ThresholdAlertConfigCreate,
+    ThresholdAlertConfigRead,
+    ThresholdAlertConfigUpdate,
+)
 from app.services.access_service import require_project_access
-from app.services.threshold_alert_config_service import apply_threshold_alert_config_update
-from app.services.operational_incident_service import enqueue_incident_notification, reevaluate_latest_sensor_threshold
-from app.services.project_device_config_service import export_project_device_config
-from app.services.permission_service import has_permission
-from app.services.public_identity_service import (
-    PublicIdentityNotFoundError, get_actuator_by_public_id, get_device_by_public_id,
-    get_sensor_by_public_id, get_system_by_public_id, get_user_by_public_id,
+from app.services.actuator_command_service import (
+    create_actuator_command as enqueue_actuator_command,
+)
+from app.services.actuator_identity_service import validate_local_actuator_code
+from app.services.alert_scenario_service import (
+    create_scenario,
+    get_scenario,
+    list_scenarios,
+    reconcile_disabled_scenario,
+    retire_resource_scenarios,
+    scenario_read,
+    update_scenario,
 )
 from app.services.aquaponics_system_creation_service import (
     AquaponicsSystemCreationError,
     create_aquaponics_system,
 )
-from app.services.actuator_identity_service import validate_local_actuator_code
-from app.schemas.project import AquaponicsSystemMqttConfigExport
-from app.schemas.threshold_alert_config import ThresholdAlertConfigCreate, ThresholdAlertConfigRead, ThresholdAlertConfigUpdate
-from app.schemas.alert_scenario import AlertScenarioCreate, AlertScenarioRead, AlertScenarioUpdate
-from app.services.alert_scenario_service import create_scenario, get_scenario, list_scenarios, reconcile_disabled_scenario, scenario_read, update_scenario
-from app.schemas.actuator import ActuatorCommandCreate, ActuatorCommandRead, ActuatorReadingRead
-from app.schemas.alert import AlertRead, AlertResolutionRequest
-from app.schemas.telemetry import TelemetryReadingRead
+from app.services.operational_incident_service import (
+    enqueue_incident_notification,
+    reevaluate_latest_sensor_threshold,
+)
+from app.services.permission_service import has_permission
+from app.services.project_device_config_service import export_project_device_config
+from app.services.project_scenario_sync_service import (
+    retire_actuator_from_scenarios,
+    retire_sensor_from_scenarios,
+    sync_new_actuator_to_scenarios,
+    sync_new_sensor_to_scenarios,
+)
+from app.services.public_identity_service import (
+    PublicIdentityNotFoundError,
+    get_actuator_by_public_id,
+    get_device_by_public_id,
+    get_sensor_by_public_id,
+    get_system_by_public_id,
+    get_user_by_public_id,
+)
+from app.services.threshold_alert_config_service import apply_threshold_alert_config_update
 
 router = APIRouter(prefix="/aquaponics-systems")
 
@@ -59,8 +97,9 @@ def _local_actuator_code(code: str, *, system: Project, device: Device) -> str:
 
 class AquaponicsSystemCreate(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    name: str = Field(min_length=2, max_length=255)
     owner_user_id: UUID
+    device_template_id: int = Field(gt=0)
+    scenario_catalog_id: int = Field(gt=0)
 
 
 class AquaponicsSystemUpdate(BaseModel):
@@ -78,6 +117,8 @@ class AquaponicsSystemRead(BaseModel):
     location: str | None
     description: str | None
     owner_user_id: UUID
+    device_template_id: int | None
+    scenario_catalog_id: int | None
     status: AquaponicsSystemStatus
     disabled_at: datetime | None = None
     disabled_reason: str | None = None
@@ -214,14 +255,20 @@ def _sensor_threshold_from_defaults(sensor_id: int, *, model: SensorModel, mappi
 
 def _device_read(device: Device) -> dict:
     sensors = [item for item in device.sensors if not item.is_deleted and item.deleted_at is None]
-    actuators = [item for item in device.actuators if not item.is_deleted and item.removed_at is None]
+    actuators = sorted(
+        (item for item in device.actuators if not item.is_deleted and item.removed_at is None),
+        key=lambda item: (item.sequence_number, item.id),
+    )
     return {"id": device.public_id, "aquaponics_system_id": device.project.public_id, "code": device.code, "name": device.name, "description": device.description, "location": device.location, "device_template_id": device.device_template_id, "status": device.status, "is_enabled": device.is_enabled, "sensors": [_sensor_read(item) for item in sensors], "actuators": [_actuator_read(item) for item in actuators]}
 
 
 def _system_read(system: Project) -> dict:
     return {"id": system.public_id, "code": system.code, "name": system.name, "location": system.location,
-        "description": system.description, "owner_user_id": system.owner.public_id, "status": system.status,
-        "disabled_at": system.disabled_at, "disabled_reason": system.disabled_reason}
+        "description": system.description, "owner_user_id": system.owner.public_id,
+        "device_template_id": system.device_template_id,
+        "scenario_catalog_id": system.scenario_catalog_id,
+        "status": system.status, "disabled_at": system.disabled_at,
+        "disabled_reason": system.disabled_reason}
 
 
 def _threshold_read(item: ThresholdAlertConfig, *, sensor: Sensor | None = None, actuator: Actuator | None = None) -> dict:
@@ -261,11 +308,56 @@ async def _sensor(db: AsyncSession, system_id: UUID, device_id: UUID, sensor_id:
     return item
 
 
+async def _reject_runtime_alert_configuration(db: AsyncSession, device: Device) -> None:
+    managed = bool(
+        await db.scalar(
+            select(ProjectScenario.id)
+            .where(
+                ProjectScenario.device_id == device.id,
+                ProjectScenario.retired_at.is_(None),
+            )
+            .limit(1)
+        )
+    )
+    if managed:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "PROJECT_SCENARIO_MANAGED",
+                "detail": (
+                    "Thiết bị này được quản lý bằng ProjectScenario. "
+                    "Hãy chỉnh cấu hình trong kịch bản của thiết bị."
+                ),
+            },
+        )
+
+
 @router.get("", response_model=list[AquaponicsSystemRead], tags=["Aquaponics Systems"])
-async def list_systems(db: AsyncSession = Depends(get_db), actor: User = Depends(require_permission("aquaponics_systems.read"))) -> list[dict]:
-    query = select(Project).options(selectinload(Project.owner)).where(Project.is_deleted.is_(False)).order_by(Project.name)
+async def list_systems(
+    db: AsyncSession = Depends(get_db),
+    actor: User = Depends(require_permission("aquaponics_systems.read")),
+) -> list[dict]:
+    query = (
+        select(Project)
+        .options(selectinload(Project.owner))
+        .where(Project.is_deleted.is_(False))
+    )
     if not await has_permission(db, actor, "aquaponics_systems.read_all"):
-        query = query.where((Project.owner_user_id == actor.id) | Project.members.any(user_id=actor.id))
+        query = query.where(Project.status == AquaponicsSystemStatus.ACTIVE)
+        if actor.system_role == UserRole.OWNER:
+            query = (
+                query.where(Project.owner_user_id == actor.id)
+                .order_by(Project.created_at.desc(), Project.id.desc())
+                .limit(1)
+            )
+        else:
+            query = query.where(
+                (Project.owner_user_id == actor.id)
+                | Project.members.any(user_id=actor.id)
+            ).order_by(Project.name)
+    else:
+        query = query.order_by(Project.name)
+
     return [_system_read(row) for row in (await db.scalars(query)).all()]
 
 
@@ -273,7 +365,13 @@ async def list_systems(db: AsyncSession = Depends(get_db), actor: User = Depends
 async def create_system(payload: AquaponicsSystemCreate, db: AsyncSession = Depends(get_db), actor: User = Depends(require_permission("aquaponics_systems.create"))) -> dict:
     try:
         owner = await get_user_by_public_id(db, payload.owner_user_id)
-        item = await create_aquaponics_system(db, name=payload.name, owner_user_id=owner.id, actor_id=actor.id)
+        item = await create_aquaponics_system(
+            db,
+            owner_user_id=owner.id,
+            actor_id=actor.id,
+            device_template_id=payload.device_template_id,
+            scenario_catalog_id=payload.scenario_catalog_id,
+        )
         await db.refresh(item, attribute_names=["owner"])
         return _system_read(item)
     except PublicIdentityNotFoundError as exc:
@@ -297,13 +395,6 @@ async def update_system(system_id: UUID, payload: AquaponicsSystemUpdate, db: As
     await db.refresh(item)
     await db.refresh(item, attribute_names=["owner"])
     return _system_read(item)
-
-
-@router.delete("/{system_id}", status_code=status.HTTP_204_NO_CONTENT, tags=["Aquaponics Systems"])
-async def delete_system(system_id: UUID, db: AsyncSession = Depends(get_db), actor: User = Depends(require_permission("aquaponics_systems.delete"))) -> None:
-    item = await _public_system(db, system_id, actor, manage=True)
-    item.is_deleted = True
-    await db.commit()
 
 
 @router.get("/{system_id}/devices", response_model=list[DeviceRead], tags=["Devices"])
@@ -410,9 +501,26 @@ async def create_sensor(system_id: UUID, device_id: UUID, payload: SensorInput, 
     item = Sensor(device_id=device.id, **payload.model_dump())
     db.add(item)
     await db.flush()
-    threshold_config = _sensor_threshold_from_defaults(item.id, model=model)
-    if threshold_config is not None:
-        db.add(threshold_config)
+    await sync_new_sensor_to_scenarios(
+        db,
+        device=device,
+        sensor=item,
+        actor_id=actor.id,
+    )
+    project_scenario_managed = bool(
+        await db.scalar(
+            select(ProjectScenario.id)
+            .where(
+                ProjectScenario.device_id == device.id,
+                ProjectScenario.retired_at.is_(None),
+            )
+            .limit(1)
+        )
+    )
+    if not project_scenario_managed:
+        threshold_config = _sensor_threshold_from_defaults(item.id, model=model)
+        if threshold_config is not None:
+            db.add(threshold_config)
     await db.commit()
     await db.refresh(item)
     await db.refresh(item, attribute_names=["device"])
@@ -436,7 +544,17 @@ async def update_sensor(system_id: UUID, device_id: UUID, sensor_id: UUID, paylo
 @router.delete("/{system_id}/devices/{device_id}/sensors/{sensor_id}", status_code=status.HTTP_204_NO_CONTENT, tags=["Sensors"])
 async def delete_sensor(system_id: UUID, device_id: UUID, sensor_id: UUID, db: AsyncSession = Depends(get_db), actor: User = Depends(require_permission("sensors.delete"))) -> None:
     item = await _sensor(db, system_id, device_id, sensor_id, actor, manage=True)
+    retired_at = datetime.now(UTC)
+    await retire_sensor_from_scenarios(
+        db,
+        device=item.device,
+        sensor=item,
+        actor_id=actor.id,
+        retired_at=retired_at,
+    )
+    await retire_resource_scenarios(db, target_type="SENSOR", resource_id=item.id)
     item.is_deleted = True
+    item.deleted_at = retired_at
     await db.commit()
 
 
@@ -456,6 +574,13 @@ async def create_actuator(system_id: UUID, device_id: UUID, payload: ActuatorInp
     sequence = int(await db.scalar(select(Actuator.sequence_number).where(Actuator.device_id == device.id).order_by(Actuator.sequence_number.desc()).limit(1)) or 0) + 1
     item = Actuator(device_id=device.id, sequence_number=sequence, **payload.model_dump(exclude={"code"}), code=code)
     db.add(item)
+    await db.flush()
+    await sync_new_actuator_to_scenarios(
+        db,
+        device=device,
+        actuator=item,
+        actor_id=actor.id,
+    )
     await db.commit()
     await db.refresh(item)
     await db.refresh(item, attribute_names=["device"])
@@ -482,7 +607,17 @@ async def update_actuator(system_id: UUID, device_id: UUID, actuator_id: UUID, p
 @router.delete("/{system_id}/devices/{device_id}/actuators/{actuator_id}", status_code=status.HTTP_204_NO_CONTENT, tags=["Actuators"])
 async def delete_actuator(system_id: UUID, device_id: UUID, actuator_id: UUID, db: AsyncSession = Depends(get_db), actor: User = Depends(require_permission("actuators.delete"))) -> None:
     item = await _actuator(db, system_id, device_id, actuator_id, actor, manage=True)
+    retired_at = datetime.now(UTC)
+    await retire_actuator_from_scenarios(
+        db,
+        device=item.device,
+        actuator=item,
+        actor_id=actor.id,
+        retired_at=retired_at,
+    )
+    await retire_resource_scenarios(db, target_type="ACTUATOR", resource_id=item.id)
     item.is_deleted = True
+    item.deleted_at = retired_at
     await db.commit()
 
 
@@ -497,6 +632,7 @@ async def get_sensor_threshold(system_id: UUID, device_id: UUID, sensor_id: UUID
 async def create_sensor_threshold(system_id: UUID, device_id: UUID, sensor_id: UUID, payload: ThresholdAlertConfigCreate, db: AsyncSession = Depends(get_db), actor: User = Depends(require_permission("sensors.thresholds.create"))) -> ThresholdAlertConfig:
     sensor = await _sensor(db, system_id, device_id, sensor_id, actor, manage=True)
     device = sensor.device
+    await _reject_runtime_alert_configuration(db, device)
     if await db.scalar(select(ThresholdAlertConfig.id).where(ThresholdAlertConfig.sensor_id == sensor.id)):
         raise HTTPException(status_code=409, detail="Threshold của Sensor đã tồn tại")
     item = ThresholdAlertConfig(sensor_id=sensor.id, actuator_id=None, metric_type="SENSOR_VALUE", **payload.model_dump())
@@ -512,6 +648,7 @@ async def create_sensor_threshold(system_id: UUID, device_id: UUID, sensor_id: U
 async def update_sensor_threshold(system_id: UUID, device_id: UUID, sensor_id: UUID, payload: ThresholdAlertConfigUpdate, db: AsyncSession = Depends(get_db), actor: User = Depends(require_permission("sensors.thresholds.update"))) -> ThresholdAlertConfig:
     sensor = await _sensor(db, system_id, device_id, sensor_id, actor, manage=True)
     device = sensor.device
+    await _reject_runtime_alert_configuration(db, device)
     item = await db.scalar(select(ThresholdAlertConfig).where(ThresholdAlertConfig.sensor_id == sensor.id))
     if item is None:
         raise HTTPException(status_code=404, detail="Không tìm thấy Threshold của Sensor")
@@ -527,6 +664,7 @@ async def update_sensor_threshold(system_id: UUID, device_id: UUID, sensor_id: U
 async def delete_sensor_threshold(system_id: UUID, device_id: UUID, sensor_id: UUID, db: AsyncSession = Depends(get_db), actor: User = Depends(require_permission("sensors.thresholds.delete"))) -> None:
     sensor = await _sensor(db, system_id, device_id, sensor_id, actor, manage=True)
     device = sensor.device
+    await _reject_runtime_alert_configuration(db, device)
     item = await db.scalar(select(ThresholdAlertConfig).where(ThresholdAlertConfig.sensor_id == sensor.id))
     if item is None:
         raise HTTPException(status_code=404, detail="Không tìm thấy Threshold của Sensor")
@@ -545,6 +683,7 @@ async def list_sensor_scenarios(system_id: UUID, device_id: UUID, sensor_id: UUI
 @router.post("/{system_id}/devices/{device_id}/sensors/{sensor_id}/alert-scenarios", response_model=AlertScenarioRead, status_code=201, tags=["Sensors"])
 async def create_sensor_scenario(system_id: UUID, device_id: UUID, sensor_id: UUID, payload: AlertScenarioCreate, db: AsyncSession = Depends(get_db), actor: User = Depends(require_permission("sensors.thresholds.create"))) -> dict:
     sensor = await _sensor(db, system_id, device_id, sensor_id, actor, manage=True)
+    await _reject_runtime_alert_configuration(db, sensor.device)
     rule = await create_scenario(db, target_type="SENSOR", resource_id=sensor.id, payload=payload, actor_id=actor.id)
     await db.commit(); rule, revision = await get_scenario(db, target_type="SENSOR", resource_id=sensor.id, public_id=rule.public_id)
     return scenario_read(rule, revision)
@@ -558,7 +697,9 @@ async def get_sensor_scenario(system_id: UUID, device_id: UUID, sensor_id: UUID,
 
 @router.patch("/{system_id}/devices/{device_id}/sensors/{sensor_id}/alert-scenarios/{scenario_id}", response_model=AlertScenarioRead, tags=["Sensors"])
 async def patch_sensor_scenario(system_id: UUID, device_id: UUID, sensor_id: UUID, scenario_id: UUID, payload: AlertScenarioUpdate, db: AsyncSession = Depends(get_db), actor: User = Depends(require_permission("sensors.thresholds.update"))) -> dict:
-    sensor = await _sensor(db, system_id, device_id, sensor_id, actor, manage=True); rule, current = await get_scenario(db, target_type="SENSOR", resource_id=sensor.id, public_id=scenario_id)
+    sensor = await _sensor(db, system_id, device_id, sensor_id, actor, manage=True)
+    await _reject_runtime_alert_configuration(db, sensor.device)
+    rule, current = await get_scenario(db, target_type="SENSOR", resource_id=sensor.id, public_id=scenario_id)
     revision = await update_scenario(db, rule=rule, current=current, payload=payload, actor_id=actor.id)
     if payload.is_enabled is False: await reconcile_disabled_scenario(db, rule)
     await db.flush(); await db.refresh(rule); response = scenario_read(rule, revision); await db.commit(); return response
@@ -566,7 +707,9 @@ async def patch_sensor_scenario(system_id: UUID, device_id: UUID, sensor_id: UUI
 
 @router.delete("/{system_id}/devices/{device_id}/sensors/{sensor_id}/alert-scenarios/{scenario_id}", status_code=204, tags=["Sensors"])
 async def retire_sensor_scenario(system_id: UUID, device_id: UUID, sensor_id: UUID, scenario_id: UUID, db: AsyncSession = Depends(get_db), actor: User = Depends(require_permission("sensors.thresholds.delete"))) -> None:
-    sensor = await _sensor(db, system_id, device_id, sensor_id, actor, manage=True); rule, revision = await get_scenario(db, target_type="SENSOR", resource_id=sensor.id, public_id=scenario_id)
+    sensor = await _sensor(db, system_id, device_id, sensor_id, actor, manage=True)
+    await _reject_runtime_alert_configuration(db, sensor.device)
+    rule, revision = await get_scenario(db, target_type="SENSOR", resource_id=sensor.id, public_id=scenario_id)
     rule.is_enabled = False; rule.retired_at = datetime.now(UTC); revision.status = "RETIRED"; await reconcile_disabled_scenario(db, rule); await db.commit()
 
 
@@ -605,10 +748,12 @@ async def actuator_commands(system_id: UUID, device_id: UUID, actuator_id: UUID,
 @router.post("/{system_id}/devices/{device_id}/actuators/{actuator_id}/commands", response_model=ActuatorCommandRead, status_code=status.HTTP_201_CREATED, tags=["Actuators"])
 async def create_actuator_command(system_id: UUID, device_id: UUID, actuator_id: UUID, payload: ActuatorCommandCreate, db: AsyncSession = Depends(get_db), actor: User = Depends(require_permission("actuators.commands.create"))) -> dict:
     actuator = await _actuator(db, system_id, device_id, actuator_id, actor, manage=True)
-    command = ActuatorCommand(actuator_id=actuator.id, desired_state=payload.desired_state, requested_by_user_id=actor.id, requested_at=datetime.now(UTC), status="PENDING")
-    db.add(command)
-    await db.commit()
-    await db.refresh(command)
+    command = await enqueue_actuator_command(
+        db,
+        actuator=actuator,
+        desired_state=payload.desired_state,
+        requested_by_user_id=actor.id,
+    )
     return {"command_id": command.id, "actuator_id": actuator.public_id, "desired_state": command.desired_state, "reported_state": command.reported_state, "status": command.status, "requested_at": command.requested_at}
 
 
@@ -630,6 +775,7 @@ async def get_actuator_threshold(system_id: UUID, device_id: UUID, actuator_id: 
 @router.post("/{system_id}/devices/{device_id}/actuators/{actuator_id}/threshold-alerts/{metric}", response_model=ThresholdAlertConfigRead, status_code=status.HTTP_201_CREATED, responses={409: {"description": "Threshold already configured"}}, tags=["Actuators"])
 async def create_actuator_threshold(system_id: UUID, device_id: UUID, actuator_id: UUID, metric: ActuatorThresholdMetric, payload: ThresholdAlertConfigCreate, db: AsyncSession = Depends(get_db), actor: User = Depends(require_permission("actuators.thresholds.create"))) -> ThresholdAlertConfig:
     actuator = await _actuator(db, system_id, device_id, actuator_id, actor, manage=True)
+    await _reject_runtime_alert_configuration(db, actuator.device)
     if await db.scalar(select(ThresholdAlertConfig.id).where(ThresholdAlertConfig.actuator_id == actuator.id, ThresholdAlertConfig.metric_type == metric)):
         raise HTTPException(status_code=409, detail="Threshold của Actuator đã tồn tại")
     item = ThresholdAlertConfig(actuator_id=actuator.id, sensor_id=None, metric_type=metric, **payload.model_dump())
@@ -640,6 +786,7 @@ async def create_actuator_threshold(system_id: UUID, device_id: UUID, actuator_i
 @router.patch("/{system_id}/devices/{device_id}/actuators/{actuator_id}/threshold-alerts/{metric}", response_model=ThresholdAlertConfigRead, tags=["Actuators"])
 async def update_actuator_threshold(system_id: UUID, device_id: UUID, actuator_id: UUID, metric: ActuatorThresholdMetric, payload: ThresholdAlertConfigUpdate, db: AsyncSession = Depends(get_db), actor: User = Depends(require_permission("actuators.thresholds.update"))) -> ThresholdAlertConfig:
     actuator = await _actuator(db, system_id, device_id, actuator_id, actor, manage=True)
+    await _reject_runtime_alert_configuration(db, actuator.device)
     item = await db.scalar(select(ThresholdAlertConfig).where(ThresholdAlertConfig.actuator_id == actuator.id, ThresholdAlertConfig.metric_type == metric))
     if item is None:
         raise HTTPException(status_code=404, detail="Không tìm thấy Threshold của Actuator")
@@ -650,6 +797,7 @@ async def update_actuator_threshold(system_id: UUID, device_id: UUID, actuator_i
 @router.delete("/{system_id}/devices/{device_id}/actuators/{actuator_id}/threshold-alerts/{metric}", status_code=status.HTTP_204_NO_CONTENT, tags=["Actuators"])
 async def delete_actuator_threshold(system_id: UUID, device_id: UUID, actuator_id: UUID, metric: ActuatorThresholdMetric, db: AsyncSession = Depends(get_db), actor: User = Depends(require_permission("actuators.thresholds.delete"))) -> None:
     actuator = await _actuator(db, system_id, device_id, actuator_id, actor, manage=True)
+    await _reject_runtime_alert_configuration(db, actuator.device)
     item = await db.scalar(select(ThresholdAlertConfig).where(ThresholdAlertConfig.actuator_id == actuator.id, ThresholdAlertConfig.metric_type == metric))
     if item is None:
         raise HTTPException(status_code=404, detail="Không tìm thấy Threshold của Actuator")
@@ -665,6 +813,7 @@ async def list_actuator_scenarios(system_id: UUID, device_id: UUID, actuator_id:
 @router.post("/{system_id}/devices/{device_id}/actuators/{actuator_id}/alert-scenarios", response_model=AlertScenarioRead, status_code=201, tags=["Actuators"])
 async def create_actuator_scenario(system_id: UUID, device_id: UUID, actuator_id: UUID, payload: AlertScenarioCreate, db: AsyncSession = Depends(get_db), actor: User = Depends(require_permission("actuators.thresholds.create"))) -> dict:
     actuator = await _actuator(db, system_id, device_id, actuator_id, actor, manage=True)
+    await _reject_runtime_alert_configuration(db, actuator.device)
     rule = await create_scenario(db, target_type="ACTUATOR", resource_id=actuator.id, payload=payload, actor_id=actor.id)
     await db.commit(); rule, revision = await get_scenario(db, target_type="ACTUATOR", resource_id=actuator.id, public_id=rule.public_id)
     return scenario_read(rule, revision)
@@ -678,7 +827,9 @@ async def get_actuator_scenario(system_id: UUID, device_id: UUID, actuator_id: U
 
 @router.patch("/{system_id}/devices/{device_id}/actuators/{actuator_id}/alert-scenarios/{scenario_id}", response_model=AlertScenarioRead, tags=["Actuators"])
 async def patch_actuator_scenario(system_id: UUID, device_id: UUID, actuator_id: UUID, scenario_id: UUID, payload: AlertScenarioUpdate, db: AsyncSession = Depends(get_db), actor: User = Depends(require_permission("actuators.thresholds.update"))) -> dict:
-    actuator = await _actuator(db, system_id, device_id, actuator_id, actor, manage=True); rule, current = await get_scenario(db, target_type="ACTUATOR", resource_id=actuator.id, public_id=scenario_id)
+    actuator = await _actuator(db, system_id, device_id, actuator_id, actor, manage=True)
+    await _reject_runtime_alert_configuration(db, actuator.device)
+    rule, current = await get_scenario(db, target_type="ACTUATOR", resource_id=actuator.id, public_id=scenario_id)
     revision = await update_scenario(db, rule=rule, current=current, payload=payload, actor_id=actor.id)
     if payload.is_enabled is False: await reconcile_disabled_scenario(db, rule)
     await db.flush(); await db.refresh(rule); response = scenario_read(rule, revision); await db.commit(); return response
@@ -686,17 +837,26 @@ async def patch_actuator_scenario(system_id: UUID, device_id: UUID, actuator_id:
 
 @router.delete("/{system_id}/devices/{device_id}/actuators/{actuator_id}/alert-scenarios/{scenario_id}", status_code=204, tags=["Actuators"])
 async def retire_actuator_scenario(system_id: UUID, device_id: UUID, actuator_id: UUID, scenario_id: UUID, db: AsyncSession = Depends(get_db), actor: User = Depends(require_permission("actuators.thresholds.delete"))) -> None:
-    actuator = await _actuator(db, system_id, device_id, actuator_id, actor, manage=True); rule, revision = await get_scenario(db, target_type="ACTUATOR", resource_id=actuator.id, public_id=scenario_id)
+    actuator = await _actuator(db, system_id, device_id, actuator_id, actor, manage=True)
+    await _reject_runtime_alert_configuration(db, actuator.device)
+    rule, revision = await get_scenario(db, target_type="ACTUATOR", resource_id=actuator.id, public_id=scenario_id)
     rule.is_enabled = False; rule.retired_at = datetime.now(UTC); revision.status = "RETIRED"; await reconcile_disabled_scenario(db, rule); await db.commit()
 
 
-async def _alert_read(db: AsyncSession, row: OperationalIncident) -> AlertRead:
+def _build_alert_read(
+    row: OperationalIncident,
+    *,
+    users: dict[int, User],
+    devices: dict[int, Device],
+    sensors: dict[int, Sensor],
+    actuators: dict[int, Actuator],
+) -> AlertRead:
     snapshot = row.trigger_snapshot or {}
-    resolved_by = await db.get(User, row.resolved_by) if row.resolved_by else None
-    acknowledged_by = await db.get(User, row.acknowledged_by) if row.acknowledged_by else None
-    device = await db.get(Device, row.device_id) if row.device_id else None
-    sensor = await db.get(Sensor, row.sensor_id) if row.sensor_id else None
-    actuator = await db.get(Actuator, row.actuator_id) if row.actuator_id else None
+    resolved_by = users.get(row.resolved_by) if row.resolved_by else None
+    acknowledged_by = users.get(row.acknowledged_by) if row.acknowledged_by else None
+    device = devices.get(row.device_id) if row.device_id else None
+    sensor = sensors.get(row.sensor_id) if row.sensor_id else None
+    actuator = actuators.get(row.actuator_id) if row.actuator_id else None
     resource_type = snapshot.get("resource_type") or ("ACTUATOR" if row.actuator_id else "SENSOR")
     return AlertRead(
         id=row.id, resource_type=resource_type, device_id=device.public_id if device else None, sensor_id=sensor.public_id if sensor else None,
@@ -714,6 +874,55 @@ async def _alert_read(db: AsyncSession, row: OperationalIncident) -> AlertRead:
     )
 
 
+async def _alert_reads(
+    db: AsyncSession,
+    rows: list[OperationalIncident],
+) -> list[AlertRead]:
+    if not rows:
+        return []
+
+    user_ids = {
+        user_id
+        for row in rows
+        for user_id in (row.resolved_by, row.acknowledged_by)
+        if user_id is not None
+    }
+    device_ids = {row.device_id for row in rows if row.device_id is not None}
+    sensor_ids = {row.sensor_id for row in rows if row.sensor_id is not None}
+    actuator_ids = {row.actuator_id for row in rows if row.actuator_id is not None}
+
+    users = (
+        {item.id: item for item in (await db.scalars(select(User).where(User.id.in_(user_ids)))).all()}
+        if user_ids else {}
+    )
+    devices = (
+        {item.id: item for item in (await db.scalars(select(Device).where(Device.id.in_(device_ids)))).all()}
+        if device_ids else {}
+    )
+    sensors = (
+        {item.id: item for item in (await db.scalars(select(Sensor).where(Sensor.id.in_(sensor_ids)))).all()}
+        if sensor_ids else {}
+    )
+    actuators = (
+        {item.id: item for item in (await db.scalars(select(Actuator).where(Actuator.id.in_(actuator_ids)))).all()}
+        if actuator_ids else {}
+    )
+    return [
+        _build_alert_read(
+            row,
+            users=users,
+            devices=devices,
+            sensors=sensors,
+            actuators=actuators,
+        )
+        for row in rows
+    ]
+
+
+async def _alert_read(db: AsyncSession, row: OperationalIncident) -> AlertRead:
+    return (await _alert_reads(db, [row]))[0]
+
+
 async def _alert(db: AsyncSession, system_id: UUID, alert_id: int, actor: User) -> OperationalIncident:
     system = await _public_system(db, system_id, actor)
     row = await db.scalar(select(OperationalIncident).where(OperationalIncident.id == alert_id, OperationalIncident.project_id == system.id))
@@ -726,8 +935,8 @@ async def list_system_alerts(system_id: UUID, status_filter: AlertLifecycleStatu
     system = await _public_system(db, system_id, actor)
     query = select(OperationalIncident).where(OperationalIncident.project_id == system.id)
     if status_filter is not None: query = query.where(OperationalIncident.status == status_filter)
-    rows = (await db.scalars(query.order_by(OperationalIncident.started_at.desc()).limit(500))).all()
-    return [await _alert_read(db, row) for row in rows]
+    rows = list((await db.scalars(query.order_by(OperationalIncident.started_at.desc()).limit(500))).all())
+    return await _alert_reads(db, rows)
 
 
 @router.get("/{system_id}/alerts/{alert_id}", response_model=AlertRead, tags=["Alerts"])

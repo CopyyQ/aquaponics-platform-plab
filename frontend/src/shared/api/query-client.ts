@@ -6,6 +6,7 @@ export const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
       staleTime: 30_000,
+      gcTime: 60_000,
       retry: (failureCount, error) => !isAccountAuthError(error) && failureCount < 1,
       refetchOnWindowFocus: false,
     },

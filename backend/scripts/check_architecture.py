@@ -8,6 +8,35 @@ from collections import Counter
 from pathlib import Path
 
 APP_ROOT = Path(__file__).resolve().parents[1] / "app"
+SERVICE_ROOT = APP_ROOT / "services"
+
+
+def scan_service_fastapi_dependencies() -> list[str]:
+    errors: list[str] = []
+    for path in sorted(SERVICE_ROOT.rglob("*.py")):
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                for alias in node.names:
+                    if alias.name == "fastapi" or alias.name.startswith("fastapi."):
+                        errors.append(
+                            f"{path.relative_to(APP_ROOT.parent)}:{node.lineno}: "
+                            f"{alias.name}: services cannot depend on FastAPI HTTP types"
+                        )
+            elif isinstance(node, ast.ImportFrom) and node.module:
+                if not (
+                    path.name == "project_activity_service.py"
+                    and node.module == "fastapi.encoders"
+                    and {alias.name for alias in node.names} == {"jsonable_encoder"}
+                ) and (
+                    node.module == "fastapi"
+                    or node.module.startswith("fastapi.")
+                ):
+                    errors.append(
+                        f"{path.relative_to(APP_ROOT.parent)}:{node.lineno}: "
+                        f"{node.module}: services cannot depend on FastAPI HTTP types"
+                    )
+    return errors
 
 
 def layer(path: Path) -> str | None:
@@ -43,6 +72,7 @@ def violation(source_layer: str | None, module: str, path: Path) -> str | None:
 
 def main() -> int:
     errors: list[str] = []
+    errors.extend(scan_service_fastapi_dependencies())
     for path in sorted(APP_ROOT.rglob("*.py")):
         source_layer = layer(path)
         tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))

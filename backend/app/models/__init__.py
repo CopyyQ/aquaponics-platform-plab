@@ -11,14 +11,19 @@ from app.models.actuator_model import ActuatorModel
 from app.models.sensor_model import SensorModel
 from app.models.telemetry import TelemetryAggregate, TelemetryReading
 from app.models.user import User
+from app.models.auth_session import AuthRateLimitBucket, UserSession
 from app.models.permission import Permission, Role, RoleAssignment, RolePermission, UserPermissionOverride
 from app.models.scada_dashboard import ScadaDashboard
-from app.models.project_settings import ProjectNotificationRecipient, ProjectNotificationRiskPolicy, ProjectNotificationSettings, ProjectPublicSettings
+from app.models.project_settings import ProjectNotificationRecipient, ProjectNotificationSettings, ProjectPublicSettings
+from app.models.scenario_catalog import ScenarioCatalog, ScenarioCatalogItem
+from app.models.project_scenario import ProjectScenario, ProjectScenarioItem, ProjectScenarioBranch
 from app.models.operational_alert import AlertRule, AlertRuleRevision, AlertRuleProfile, AlertRuleActuatorModelProfile, AlertRuleSensorModelProfile, AlertRuleProjectOverride, AlertRuleActuatorOverride, AlertRuleSensorOverride, OperationalIncident, NotificationOutbox, NotificationDelivery
 from app.models.threshold_alert_config import ThresholdAlertConfig
 
 __all__ = [
     "User",
+    "UserSession",
+    "AuthRateLimitBucket",
     "Device",
     "DeviceCredential",
     "DeviceTemplate",
@@ -41,6 +46,11 @@ __all__ = [
     "ProjectPublicSettings",
     "ProjectNotificationSettings",
     "ProjectNotificationRecipient",
+    "ScenarioCatalog",
+    "ScenarioCatalogItem",
+    "ProjectScenario",
+    "ProjectScenarioItem",
+    "ProjectScenarioBranch",
     "AlertRule",
     "AlertRuleRevision",
     "AlertRuleProfile",

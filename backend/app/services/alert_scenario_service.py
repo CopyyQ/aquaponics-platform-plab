@@ -3,20 +3,30 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from uuid import UUID, uuid4
 
-from fastapi import HTTPException
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.operational_alert import AlertRule, AlertRuleActuatorOverride, AlertRuleRevision, AlertRuleSensorOverride, OperationalIncident
+from app.core.exceptions import ApplicationError, ErrorDetail
+from app.models.operational_alert import (
+    AlertRule,
+    AlertRuleActuatorOverride,
+    AlertRuleRevision,
+    AlertRuleSensorOverride,
+    OperationalIncident,
+)
 from app.schemas.alert_scenario import AlertScenarioCreate, AlertScenarioUpdate
 from app.services.alert_evaluators import validate_condition_config
-from app.services.operational_incident_service import ACTIVE_INCIDENT_STATUSES, enqueue_incident_notification
+from app.services.operational_incident_service import (
+    ACTIVE_INCIDENT_STATUSES,
+    enqueue_incident_notification,
+)
 
 
 def _condition(target_type: str, values: dict) -> tuple[str, dict]:
     duration = int(values.get("duration_seconds", 0))
     if target_type == "ACTUATOR":
-        config = {"logic": "AND", "reported_state": values.get("reported_state"),
+        config = {"logic": "AND", "desired_state": values.get("desired_state"),
+                  "reported_state": values.get("reported_state"),
                   "voltage": values.get("voltage"), "current": values.get("current"),
                   "duration_seconds": duration}
         evaluator = "MULTI_CONDITION"
@@ -24,12 +34,27 @@ def _condition(target_type: str, values: dict) -> tuple[str, dict]:
         bounds = values.get("range")
         mode = values.get("range_mode")
         if bounds is None or mode not in {"INSIDE_RANGE", "OUTSIDE_RANGE"}:
-            raise HTTPException(422, "Kịch bản Sensor cần khoảng và chế độ đánh giá rõ ràng")
+            raise ApplicationError(
+                "INVALID_SENSOR_SCENARIO",
+                "Kịch bản Sensor cần khoảng và chế độ đánh giá rõ ràng",
+                422,
+            )
         config = {"range": bounds, "range_mode": mode, "duration_seconds": duration}
         evaluator = "RANGE_BANDS"
     errors = _validate_scenario(evaluator, config)
     if errors:
-        raise HTTPException(422, {"invalid_fields": errors})
+        raise ApplicationError(
+            "INVALID_ALERT_SCENARIO",
+            "Kịch bản cảnh báo chưa hợp lệ.",
+            422,
+            tuple(
+                ErrorDetail(
+                    field=str(field),
+                    message="Giá trị không hợp lệ.",
+                )
+                for field in errors
+            ),
+        )
     return evaluator, config
 
 
@@ -71,7 +96,12 @@ async def get_scenario(db: AsyncSession, *, target_type: str, resource_id: int, 
     query = select(AlertRule, AlertRuleRevision).join(binding, binding.rule_id == AlertRule.id).join(AlertRuleRevision, AlertRuleRevision.id == AlertRule.current_revision_id).where(AlertRule.public_id == public_id, AlertRule.target_type == target_type, resource_field == resource_id)
     if not include_retired: query = query.where(AlertRule.retired_at.is_(None))
     row = (await db.execute(query)).one_or_none()
-    if row is None: raise HTTPException(404, "Không tìm thấy kịch bản cảnh báo")
+    if row is None:
+        raise ApplicationError(
+            "ALERT_SCENARIO_NOT_FOUND",
+            "Không tìm thấy kịch bản cảnh báo",
+            404,
+        )
     return row
 
 
@@ -82,12 +112,21 @@ async def list_scenarios(db: AsyncSession, *, target_type: str, resource_id: int
 
 
 async def update_scenario(db: AsyncSession, *, rule: AlertRule, current: AlertRuleRevision, payload: AlertScenarioUpdate, actor_id: int) -> AlertRuleRevision:
-    values = {"duration_seconds": current.condition_config.get("duration_seconds", 0), **payload.model_dump(exclude_unset=True)}
-    if rule.target_type == "ACTUATOR":
-        values = {"reported_state": current.condition_config.get("reported_state"), "voltage": current.condition_config.get("voltage"), "current": current.condition_config.get("current"), **values}
+    changed_fields = payload.model_fields_set
+    condition_fields = {"range_mode", "range", "desired_state", "reported_state", "voltage", "current"}
+    if not (changed_fields & condition_fields):
+        evaluator = rule.evaluator_type
+        config = dict(current.condition_config)
+        if "duration_seconds" in changed_fields and payload.duration_seconds is not None:
+            config["duration_seconds"] = payload.duration_seconds
     else:
-        values = {"range": current.condition_config.get("range"), "range_mode": current.condition_config.get("range_mode"), **values}
-    evaluator, config = _condition(rule.target_type, values)
+        values = {"duration_seconds": current.condition_config.get("duration_seconds", 0), **payload.model_dump(exclude_unset=True)}
+        if rule.target_type == "ACTUATOR":
+            values = {"desired_state": current.condition_config.get("desired_state"), "reported_state": current.condition_config.get("reported_state"), "voltage": current.condition_config.get("voltage"), "current": current.condition_config.get("current"), **values}
+        else:
+            values = {"range": current.condition_config.get("range"), "range_mode": current.condition_config.get("range_mode"), **values}
+        evaluator, config = _condition(rule.target_type, values)
+    rule.evaluator_type = evaluator
     if payload.name is not None: rule.name = payload.name
     if payload.is_enabled is not None: rule.is_enabled = payload.is_enabled
     revision = AlertRuleRevision(rule_id=rule.id, revision=current.revision + 1,
@@ -108,3 +147,23 @@ async def reconcile_disabled_scenario(db: AsyncSession, rule: AlertRule) -> None
         incident.status = "RESOLVED" if was_pending else "NORMALIZED"
         incident.normalized_at = now
         if not was_pending: await enqueue_incident_notification(db, incident, "RECOVERED")
+
+
+async def retire_resource_scenarios(
+    db: AsyncSession,
+    *,
+    target_type: str,
+    resource_id: int,
+) -> None:
+    rows = await list_scenarios(
+        db,
+        target_type=target_type,
+        resource_id=resource_id,
+    )
+    now = datetime.now(UTC)
+    for rule, revision in rows:
+        rule.is_enabled = False
+        rule.retired_at = now
+        revision.status = "RETIRED"
+        await reconcile_disabled_scenario(db, rule)
+    await db.flush()

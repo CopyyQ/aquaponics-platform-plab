@@ -8,22 +8,32 @@ import type {
   SensorModelUpdate, SensorUpdate, Session, TelemetryReading, TemplateActuatorSlot, TemplateActuatorSlotInput, TemplateActuatorSlotUpdate, TemplateSensorSlot,
   TemplateSensorSlotInput, TemplateSensorSlotUpdate, ThresholdAlertConfig, ThresholdAlertConfigInput, TokenResponse, UserSelfUpdate, UserSummary,
   RoleSummary, ManagedUserCreate, ManagedUserUpdate, ManagedPasswordUpdate, AccountLifecycleRequest, SystemLifecycleRequest,
-  AlertDeliverySettings, AlertDeliveryRecipient, AlertDeliveryRecipientInput, AlertDeliveryRecipientUpdate, AlertDeliveryTestResult, AlertDeliveryHistoryItem, PublicMonitoringSettings,
-  UserAquaponicsSystem,
-  PublicId, AlertScenario, AlertScenarioInput,
+  AlertDeliverySettings, AlertDeliverySettingsUpdate, AlertDeliveryRecipient, AlertDeliveryRecipientInput, AlertDeliveryRecipientUpdate, AlertDeliveryTestResult, AlertDeliveryHistoryItem,
+  UserAquaponicsSystem, UserAquaponicsSystemCreate,
+  ScenarioCatalog, ScenarioCatalogInput, ScenarioCatalogUpdate, ScenarioCatalogItem, ScenarioCatalogItemUpdate,
+  PublicId,
+  ProjectScenarioSummary, ProjectScenarioDetail, ProjectScenarioCreate,
+  ProjectScenarioUpdate, ProjectScenarioCloneRequest, ProjectScenarioItem,
+  ProjectScenarioItemUpdate, ProjectScenarioBranch, ProjectScenarioBranchCreate,
+  ProjectScenarioBranchUpdate, ProjectScenarioActivationResult,
 } from "./contracts"
 
 export const endpoints = {
-  authLogin: "/auth/login", session: "/auth/session", authMe: "/auth/me", changePassword: "/auth/change-password", logout: "/auth/logout",
+  authLogin: "/auth/login", authRefresh: "/auth/refresh", session: "/auth/session", authMe: "/auth/me", changePassword: "/auth/change-password", logout: "/auth/logout",
   systems: "/aquaponics-systems", system: (systemId: PublicId) => `/aquaponics-systems/${systemId}`,
   devices: (systemId: PublicId) => `/aquaponics-systems/${systemId}/devices`, device: (systemId: PublicId, deviceId: PublicId) => `${endpoints.devices(systemId)}/${deviceId}`,
+  projectScenarios: (systemId: PublicId, deviceId: PublicId) => `${endpoints.device(systemId, deviceId)}/scenarios`,
+  projectScenario: (systemId: PublicId, deviceId: PublicId, scenarioId: PublicId) => `${endpoints.projectScenarios(systemId, deviceId)}/${scenarioId}`,
+  projectScenarioClone: (systemId: PublicId, deviceId: PublicId, scenarioId: PublicId) => `${endpoints.projectScenario(systemId, deviceId, scenarioId)}/clone`,
+  projectScenarioActivate: (systemId: PublicId, deviceId: PublicId, scenarioId: PublicId) => `${endpoints.projectScenario(systemId, deviceId, scenarioId)}/activate`,
+  projectScenarioItem: (systemId: PublicId, deviceId: PublicId, scenarioId: PublicId, itemId: PublicId) => `${endpoints.projectScenario(systemId, deviceId, scenarioId)}/items/${itemId}`,
+  projectScenarioBranches: (systemId: PublicId, deviceId: PublicId, scenarioId: PublicId, itemId: PublicId) => `${endpoints.projectScenarioItem(systemId, deviceId, scenarioId, itemId)}/branches`,
+  projectScenarioBranch: (systemId: PublicId, deviceId: PublicId, scenarioId: PublicId, itemId: PublicId, branchId: PublicId) => `${endpoints.projectScenarioBranches(systemId, deviceId, scenarioId, itemId)}/${branchId}`,
   sensors: (systemId: PublicId, deviceId: PublicId) => `${endpoints.device(systemId, deviceId)}/sensors`, sensor: (systemId: PublicId, deviceId: PublicId, sensorId: PublicId) => `${endpoints.sensors(systemId, deviceId)}/${sensorId}`,
   sensorThreshold: (systemId: PublicId, deviceId: PublicId, sensorId: PublicId) => `${endpoints.sensor(systemId, deviceId, sensorId)}/threshold-alert`, sensorTelemetry: (systemId: PublicId, deviceId: PublicId, sensorId: PublicId) => `${endpoints.sensor(systemId, deviceId, sensorId)}/telemetry`,
   actuators: (systemId: PublicId, deviceId: PublicId) => `${endpoints.device(systemId, deviceId)}/actuators`, actuator: (systemId: PublicId, deviceId: PublicId, actuatorId: PublicId) => `${endpoints.actuators(systemId, deviceId)}/${actuatorId}`,
   actuatorReadings: (systemId: PublicId, deviceId: PublicId, actuatorId: PublicId) => `${endpoints.actuator(systemId, deviceId, actuatorId)}/readings`, actuatorCommands: (systemId: PublicId, deviceId: PublicId, actuatorId: PublicId) => `${endpoints.actuator(systemId, deviceId, actuatorId)}/commands`,
   actuatorThreshold: (systemId: PublicId, deviceId: PublicId, actuatorId: PublicId, metric: string) => `${endpoints.actuator(systemId, deviceId, actuatorId)}/threshold-alerts/${metric}`,
-  sensorScenarios: (systemId: PublicId, deviceId: PublicId, sensorId: PublicId) => `${endpoints.sensor(systemId, deviceId, sensorId)}/alert-scenarios`,
-  actuatorScenarios: (systemId: PublicId, deviceId: PublicId, actuatorId: PublicId) => `${endpoints.actuator(systemId, deviceId, actuatorId)}/alert-scenarios`,
   alerts: (systemId: PublicId) => `${endpoints.system(systemId)}/alerts`, alert: (systemId: PublicId, alertId: number) => `${endpoints.alerts(systemId)}/${alertId}`,
   monitoringLatest: (systemId: PublicId) => `${endpoints.system(systemId)}/monitoring/latest`, monitoringSeries: (systemId: PublicId) => `${endpoints.system(systemId)}/monitoring/series`, monitoringActuatorHistory: (systemId: PublicId, deviceId: PublicId) => `${endpoints.device(systemId, deviceId)}/monitoring/actuator-history`,
   members: (systemId: PublicId) => `${endpoints.system(systemId)}/members`, member: (systemId: PublicId, userId: PublicId) => `${endpoints.members(systemId)}/${userId}`, activities: (systemId: PublicId) => `${endpoints.system(systemId)}/activities`,
@@ -31,6 +41,7 @@ export const endpoints = {
   alertSettings: (systemId: PublicId) => `${endpoints.alerts(systemId)}/settings`, mqttExport: (systemId: PublicId) => `${endpoints.system(systemId)}/mqtt-config/export`,
   sensorModels: "/sensor-models", sensorModel: (id: number) => `/sensor-models/${id}`, actuatorModels: "/actuator-models", actuatorModel: (id: number) => `/actuator-models/${id}`,
   users: "/users", user: (id: PublicId) => `/users/${id}`, templates: "/device-templates", template: (id: number) => `/device-templates/${id}`,
+  scenarioCatalogs: "/scenario-catalogs", scenarioCatalog: (id: number) => `/scenario-catalogs/${id}`, scenarioCatalogItem: (id: number, itemId: number) => `/scenario-catalogs/${id}/items/${itemId}`,
   templateSensors: (id: number) => `${endpoints.template(id)}/sensors`, templateSensor: (id: number, mappingId: number) => `${endpoints.templateSensors(id)}/${mappingId}`,
   templateActuators: (id: number) => `${endpoints.template(id)}/actuators`, templateActuator: (id: number, mappingId: number) => `${endpoints.templateActuators(id)}/${mappingId}`,
   roles: "/roles",
@@ -44,14 +55,13 @@ export const endpoints = {
   deliveryRecipient: (id: PublicId, recipientId: number) => `${endpoints.deliveryRecipients(id)}/${recipientId}`,
   deliveryRecipientTest: (id: PublicId, recipientId: number) => `${endpoints.deliveryRecipient(id, recipientId)}/test`,
   deliveryHistory: (id: PublicId) => `${endpoints.system(id)}/alert-delivery/history`,
-  publicMonitoringSettings: (id: PublicId) => `${endpoints.system(id)}/public-monitoring/settings`,
-  publicMonitoringLatest: (slug: string) => `/public/aquaponics-systems/${encodeURIComponent(slug)}/monitoring/latest`,
-  publicMonitoringSeries: (slug: string) => `/public/aquaponics-systems/${encodeURIComponent(slug)}/monitoring/series`,
 } as const
 
 export const queryKeys = {
   systems: ["aquaponics-systems"] as const, system: (id: PublicId) => ["aquaponics-system", id] as const,
   devices: (systemId: PublicId) => ["aquaponics-system", systemId, "devices"] as const, device: (systemId: PublicId, id: PublicId) => ["aquaponics-system", systemId, "device", id] as const,
+  projectScenarios: (systemId: PublicId, deviceId: PublicId) => ["aquaponics-system", systemId, "device", deviceId, "scenarios"] as const,
+  projectScenario: (systemId: PublicId, deviceId: PublicId, scenarioId: PublicId) => ["aquaponics-system", systemId, "device", deviceId, "scenario", scenarioId] as const,
   sensor: (systemId: PublicId, deviceId: PublicId, id: PublicId) => ["aquaponics-system", systemId, "device", deviceId, "sensor", id] as const,
   sensorTelemetry: (systemId: PublicId, deviceId: PublicId, id: PublicId, start?: string, end?: string, limit?: number) => ["aquaponics-system", systemId, "device", deviceId, "sensor", id, "telemetry", { start, end, limit }] as const,
   sensorThreshold: (systemId: PublicId, deviceId: PublicId, id: PublicId) => ["aquaponics-system", systemId, "device", deviceId, "sensor", id, "threshold"] as const,
@@ -59,8 +69,6 @@ export const queryKeys = {
   actuatorReadings: (systemId: PublicId, deviceId: PublicId, id: PublicId, limit?: number) => ["aquaponics-system", systemId, "device", deviceId, "actuator", id, "readings", { limit }] as const,
   actuatorCommands: (systemId: PublicId, deviceId: PublicId, id: PublicId, limit?: number) => ["aquaponics-system", systemId, "device", deviceId, "actuator", id, "commands", { limit }] as const,
   actuatorThreshold: (systemId: PublicId, deviceId: PublicId, id: PublicId, metric: ActuatorThresholdMetric) => ["aquaponics-system", systemId, "device", deviceId, "actuator", id, "threshold", metric] as const,
-  sensorScenarios: (systemId: PublicId, deviceId: PublicId, id: PublicId) => ["aquaponics-system", systemId, "device", deviceId, "sensor", id, "alert-scenarios"] as const,
-  actuatorScenarios: (systemId: PublicId, deviceId: PublicId, id: PublicId) => ["aquaponics-system", systemId, "device", deviceId, "actuator", id, "alert-scenarios"] as const,
   monitoringLatest: (id: PublicId) => ["aquaponics-system", id, "monitoring", "latest"] as const, monitoringSeries: (id: PublicId, range: MonitoringRange) => ["aquaponics-system", id, "monitoring", "series", range] as const, monitoringActuatorHistory: (id: PublicId, deviceId: PublicId, range: MonitoringRange) => ["aquaponics-system", id, "device", deviceId, "monitoring", "actuator-history", range] as const,
   alerts: (id: PublicId) => ["aquaponics-system", id, "alerts"] as const, alert: (systemId: PublicId, id: number) => ["aquaponics-system", systemId, "alert", id] as const, members: (id: PublicId) => ["aquaponics-system", id, "members"] as const,
   activities: (id: PublicId, params?: { page?: number; page_size?: number; action?: string; entity_type?: string }) => ["aquaponics-system", id, "activities", params ?? {}] as const, scada: (id: PublicId) => ["aquaponics-system", id, "scada"] as const,
@@ -68,27 +76,38 @@ export const queryKeys = {
   sensorModels: ["sensor-models"] as const, sensorModel: (id: number) => ["sensor-model", id] as const,
   actuatorModels: ["actuator-models"] as const, actuatorModel: (id: number) => ["actuator-model", id] as const,
   templates: ["device-templates"] as const, template: (id: number) => ["device-template", id] as const,
+  scenarioCatalogs: ["scenario-catalogs"] as const, scenarioCatalogsByTemplate: (deviceTemplateId: number) => ["scenario-catalogs", { deviceTemplateId }] as const, scenarioCatalog: (id: number) => ["scenario-catalog", id] as const,
   users: ["users"] as const, user: (id: PublicId) => ["user", id] as const, roles: ["roles"] as const,
   userSystems: (id: PublicId) => ["user", id, "aquaponics-systems"] as const,
   deliverySettings: (id: PublicId) => ["aquaponics-system", id, "alert-delivery", "settings"] as const,
   deliveryHistory: (id: PublicId) => ["aquaponics-system", id, "alert-delivery", "history"] as const,
-  publicMonitoringSettings: (id: PublicId) => ["aquaponics-system", id, "public-monitoring", "settings"] as const,
 } as const
 
-export async function login(username: string, password: string): Promise<TokenResponse> { return (await api.post<TokenResponse>(endpoints.authLogin, { username, password })).data }
+export async function login(username: string, password: string): Promise<TokenResponse> { return (await api.post<TokenResponse>(endpoints.authLogin, { username, password }, { withCredentials: true })).data }
+export async function refreshSession(): Promise<TokenResponse> { return (await api.post<TokenResponse>(endpoints.authRefresh, undefined, { withCredentials: true })).data }
 export async function loadSession(): Promise<Session> { return (await api.get<Session>(endpoints.session)).data }
 export async function updateProfile(payload: UserSelfUpdate): Promise<Session["user"]> { return (await api.patch<Session["user"]>(endpoints.authMe, payload)).data }
 export async function changePassword(payload: ChangePasswordRequest): Promise<MessageResponse> { return (await api.post<MessageResponse>(endpoints.changePassword, payload)).data }
-export async function logout(): Promise<MessageResponse> { return (await api.post<MessageResponse>(endpoints.logout)).data }
+export async function logout(): Promise<MessageResponse> { return (await api.post<MessageResponse>(endpoints.logout, undefined, { withCredentials: true })).data }
 
 export async function listSystems(): Promise<AquaponicsSystem[]> { return (await api.get<AquaponicsSystem[]>(endpoints.systems)).data }
 export async function createSystem(payload: AquaponicsSystemCreate): Promise<AquaponicsSystem> { return (await api.post<AquaponicsSystem>(endpoints.systems, payload)).data }
 export async function getSystem(id: PublicId): Promise<AquaponicsSystem> { return (await api.get<AquaponicsSystem>(endpoints.system(id))).data }
 export async function updateSystem(id: PublicId, payload: AquaponicsSystemUpdate): Promise<AquaponicsSystem> { return (await api.patch<AquaponicsSystem>(endpoints.system(id), payload)).data }
-export async function deleteSystem(id: PublicId): Promise<void> { await api.delete(endpoints.system(id)) }
 export async function listDevices(systemId: PublicId): Promise<Device[]> { return (await api.get<Device[]>(endpoints.devices(systemId))).data }
 export async function createDevice(systemId: PublicId, payload: DeviceInput): Promise<Device> { return (await api.post<Device>(endpoints.devices(systemId), payload)).data }
 export async function getDevice(systemId: PublicId, id: PublicId): Promise<Device> { return (await api.get<Device>(endpoints.device(systemId, id))).data }
+export async function listProjectScenarios(systemId: PublicId, deviceId: PublicId): Promise<ProjectScenarioSummary[]> { return (await api.get<ProjectScenarioSummary[]>(endpoints.projectScenarios(systemId, deviceId))).data }
+export async function getProjectScenario(systemId: PublicId, deviceId: PublicId, scenarioId: PublicId): Promise<ProjectScenarioDetail> { return (await api.get<ProjectScenarioDetail>(endpoints.projectScenario(systemId, deviceId, scenarioId))).data }
+export async function createProjectScenario(systemId: PublicId, deviceId: PublicId, payload: ProjectScenarioCreate): Promise<ProjectScenarioDetail> { return (await api.post<ProjectScenarioDetail>(endpoints.projectScenarios(systemId, deviceId), payload)).data }
+export async function updateProjectScenario(systemId: PublicId, deviceId: PublicId, scenarioId: PublicId, payload: ProjectScenarioUpdate): Promise<ProjectScenarioDetail> { return (await api.patch<ProjectScenarioDetail>(endpoints.projectScenario(systemId, deviceId, scenarioId), payload)).data }
+export async function cloneProjectScenario(systemId: PublicId, deviceId: PublicId, scenarioId: PublicId, payload: ProjectScenarioCloneRequest): Promise<ProjectScenarioDetail> { return (await api.post<ProjectScenarioDetail>(endpoints.projectScenarioClone(systemId, deviceId, scenarioId), payload)).data }
+export async function activateProjectScenario(systemId: PublicId, deviceId: PublicId, scenarioId: PublicId): Promise<ProjectScenarioActivationResult> { return (await api.post<ProjectScenarioActivationResult>(endpoints.projectScenarioActivate(systemId, deviceId, scenarioId))).data }
+export async function deleteProjectScenario(systemId: PublicId, deviceId: PublicId, scenarioId: PublicId): Promise<void> { await api.delete(endpoints.projectScenario(systemId, deviceId, scenarioId)) }
+export async function updateProjectScenarioItem(systemId: PublicId, deviceId: PublicId, scenarioId: PublicId, itemId: PublicId, payload: ProjectScenarioItemUpdate): Promise<ProjectScenarioItem> { return (await api.patch<ProjectScenarioItem>(endpoints.projectScenarioItem(systemId, deviceId, scenarioId, itemId), payload)).data }
+export async function createProjectScenarioBranch(systemId: PublicId, deviceId: PublicId, scenarioId: PublicId, itemId: PublicId, payload: ProjectScenarioBranchCreate): Promise<ProjectScenarioBranch> { return (await api.post<ProjectScenarioBranch>(endpoints.projectScenarioBranches(systemId, deviceId, scenarioId, itemId), payload)).data }
+export async function updateProjectScenarioBranch(systemId: PublicId, deviceId: PublicId, scenarioId: PublicId, itemId: PublicId, branchId: PublicId, payload: ProjectScenarioBranchUpdate): Promise<ProjectScenarioBranch> { return (await api.patch<ProjectScenarioBranch>(endpoints.projectScenarioBranch(systemId, deviceId, scenarioId, itemId, branchId), payload)).data }
+export async function deleteProjectScenarioBranch(systemId: PublicId, deviceId: PublicId, scenarioId: PublicId, itemId: PublicId, branchId: PublicId): Promise<void> { await api.delete(endpoints.projectScenarioBranch(systemId, deviceId, scenarioId, itemId, branchId)) }
 export async function updateDevice(systemId: PublicId, id: PublicId, payload: DeviceUpdate): Promise<Device> { return (await api.patch<Device>(endpoints.device(systemId, id), payload)).data }
 export async function deleteDevice(systemId: PublicId, id: PublicId): Promise<void> { await api.delete(endpoints.device(systemId, id)) }
 
@@ -101,10 +120,6 @@ export async function getSensorThreshold(systemId: PublicId, deviceId: PublicId,
 export async function saveSensorThreshold(systemId: PublicId, deviceId: PublicId, id: PublicId, payload: ThresholdAlertConfigInput): Promise<ThresholdAlertConfig> { return (await api.post<ThresholdAlertConfig>(endpoints.sensorThreshold(systemId, deviceId, id), payload)).data }
 export async function updateSensorThreshold(systemId: PublicId, deviceId: PublicId, id: PublicId, payload: ThresholdAlertConfigInput): Promise<ThresholdAlertConfig> { return (await api.patch<ThresholdAlertConfig>(endpoints.sensorThreshold(systemId, deviceId, id), payload)).data }
 export async function deleteSensorThreshold(systemId: PublicId, deviceId: PublicId, id: PublicId): Promise<void> { await api.delete(endpoints.sensorThreshold(systemId, deviceId, id)) }
-export async function listSensorScenarios(systemId: PublicId, deviceId: PublicId, id: PublicId): Promise<AlertScenario[]> { return (await api.get<AlertScenario[]>(endpoints.sensorScenarios(systemId, deviceId, id))).data }
-export async function createSensorScenario(systemId: PublicId, deviceId: PublicId, id: PublicId, payload: AlertScenarioInput): Promise<AlertScenario> { return (await api.post<AlertScenario>(endpoints.sensorScenarios(systemId, deviceId, id), payload)).data }
-export async function updateSensorScenario(systemId: PublicId, deviceId: PublicId, id: PublicId, scenarioId: PublicId, payload: Partial<AlertScenarioInput>): Promise<AlertScenario> { return (await api.patch<AlertScenario>(`${endpoints.sensorScenarios(systemId, deviceId, id)}/${scenarioId}`, payload)).data }
-export async function deleteSensorScenario(systemId: PublicId, deviceId: PublicId, id: PublicId, scenarioId: PublicId): Promise<void> { await api.delete(`${endpoints.sensorScenarios(systemId, deviceId, id)}/${scenarioId}`) }
 export async function getSensorTelemetry(systemId: PublicId, deviceId: PublicId, id: PublicId, params?: { start?: string; end?: string; limit?: number }): Promise<TelemetryReading[]> { return (await api.get<TelemetryReading[]>(endpoints.sensorTelemetry(systemId, deviceId, id), { params })).data }
 
 export async function listActuators(systemId: PublicId, deviceId: PublicId): Promise<Actuator[]> { return (await api.get<Actuator[]>(endpoints.actuators(systemId, deviceId))).data }
@@ -119,10 +134,6 @@ export async function getActuatorThreshold(systemId: PublicId, deviceId: PublicI
 export async function saveActuatorThreshold(systemId: PublicId, deviceId: PublicId, id: PublicId, metric: ActuatorThresholdMetric, payload: ThresholdAlertConfigInput): Promise<ThresholdAlertConfig> { return (await api.post<ThresholdAlertConfig>(endpoints.actuatorThreshold(systemId, deviceId, id, metric), payload)).data }
 export async function updateActuatorThreshold(systemId: PublicId, deviceId: PublicId, id: PublicId, metric: ActuatorThresholdMetric, payload: ThresholdAlertConfigInput): Promise<ThresholdAlertConfig> { return (await api.patch<ThresholdAlertConfig>(endpoints.actuatorThreshold(systemId, deviceId, id, metric), payload)).data }
 export async function deleteActuatorThreshold(systemId: PublicId, deviceId: PublicId, id: PublicId, metric: ActuatorThresholdMetric): Promise<void> { await api.delete(endpoints.actuatorThreshold(systemId, deviceId, id, metric)) }
-export async function listActuatorScenarios(systemId: PublicId, deviceId: PublicId, id: PublicId): Promise<AlertScenario[]> { return (await api.get<AlertScenario[]>(endpoints.actuatorScenarios(systemId, deviceId, id))).data }
-export async function createActuatorScenario(systemId: PublicId, deviceId: PublicId, id: PublicId, payload: AlertScenarioInput): Promise<AlertScenario> { return (await api.post<AlertScenario>(endpoints.actuatorScenarios(systemId, deviceId, id), payload)).data }
-export async function updateActuatorScenario(systemId: PublicId, deviceId: PublicId, id: PublicId, scenarioId: PublicId, payload: Partial<AlertScenarioInput>): Promise<AlertScenario> { return (await api.patch<AlertScenario>(`${endpoints.actuatorScenarios(systemId, deviceId, id)}/${scenarioId}`, payload)).data }
-export async function deleteActuatorScenario(systemId: PublicId, deviceId: PublicId, id: PublicId, scenarioId: PublicId): Promise<void> { await api.delete(`${endpoints.actuatorScenarios(systemId, deviceId, id)}/${scenarioId}`) }
 
 export async function listAlerts(systemId: PublicId, status?: string): Promise<Alert[]> { return (await api.get<Alert[]>(endpoints.alerts(systemId), { params: { status } })).data }
 export async function getAlert(systemId: PublicId, id: number): Promise<Alert> { return (await api.get<Alert>(endpoints.alert(systemId, id))).data }
@@ -162,21 +173,24 @@ export async function setManagedUserPassword(id: PublicId, payload: ManagedPassw
 export async function userLifecycle(id: PublicId, action: "activate" | "disable" | "lock" | "unlock" | "restore" | "soft-delete", payload?: AccountLifecycleRequest): Promise<MessageResponse> { return (await api.post<MessageResponse>(endpoints.userLifecycle(id, action), payload ?? {})).data }
 export async function forceLogoutUser(id: PublicId): Promise<MessageResponse> { return (await api.post<MessageResponse>(endpoints.userForceLogout(id))).data }
 export async function listUserAquaponicsSystems(id: PublicId): Promise<UserAquaponicsSystem[]> { return (await api.get<UserAquaponicsSystem[]>(endpoints.userSystems(id))).data }
-export async function createUserAquaponicsSystem(userId: PublicId, name: string): Promise<UserAquaponicsSystem> { return (await api.post<UserAquaponicsSystem>(endpoints.userSystems(userId), { name })).data }
+export async function createUserAquaponicsSystem(userId: PublicId, payload: UserAquaponicsSystemCreate): Promise<UserAquaponicsSystem> { return (await api.post<UserAquaponicsSystem>(endpoints.userSystems(userId), payload)).data }
 export async function transferAquaponicsSystemOwner(systemId: PublicId, userId: PublicId): Promise<AquaponicsSystem> { return (await api.put<AquaponicsSystem>(endpoints.systemOwner(systemId), { user_id: userId })).data }
 export async function disableSystem(id: PublicId, payload: SystemLifecycleRequest): Promise<AquaponicsSystem> { return (await api.post<AquaponicsSystem>(endpoints.systemDisable(id), payload)).data }
 export async function activateSystem(id: PublicId): Promise<AquaponicsSystem> { return (await api.post<AquaponicsSystem>(endpoints.systemActivate(id))).data }
 export async function getAlertDeliverySettings(id: PublicId): Promise<AlertDeliverySettings> { return (await api.get<AlertDeliverySettings>(endpoints.deliverySettings(id))).data }
-export async function updateAlertDeliverySettings(id: PublicId, payload: AlertDeliverySettings): Promise<AlertDeliverySettings> { return (await api.put<AlertDeliverySettings>(endpoints.deliverySettings(id), payload)).data }
+export async function updateAlertDeliverySettings(id: PublicId, payload: AlertDeliverySettingsUpdate): Promise<AlertDeliverySettings> { return (await api.put<AlertDeliverySettings>(endpoints.deliverySettings(id), payload)).data }
 export async function addAlertDeliveryRecipient(id: PublicId, payload: AlertDeliveryRecipientInput): Promise<AlertDeliveryRecipient> { return (await api.post<AlertDeliveryRecipient>(endpoints.deliveryRecipients(id), payload)).data }
 export async function updateAlertDeliveryRecipient(id: PublicId, recipientId: number, payload: AlertDeliveryRecipientUpdate): Promise<AlertDeliveryRecipient> { return (await api.patch<AlertDeliveryRecipient>(endpoints.deliveryRecipient(id, recipientId), payload)).data }
 export async function deleteAlertDeliveryRecipient(id: PublicId, recipientId: number): Promise<void> { await api.delete(endpoints.deliveryRecipient(id, recipientId)) }
 export async function testAlertDeliveryRecipient(id: PublicId, recipientId: number): Promise<AlertDeliveryTestResult> { return (await api.post<AlertDeliveryTestResult>(endpoints.deliveryRecipientTest(id, recipientId))).data }
 export async function getAlertDeliveryHistory(id: PublicId): Promise<AlertDeliveryHistoryItem[]> { return (await api.get<AlertDeliveryHistoryItem[]>(endpoints.deliveryHistory(id))).data }
-export async function getPublicMonitoringSettings(id: PublicId): Promise<PublicMonitoringSettings> { return (await api.get<PublicMonitoringSettings>(endpoints.publicMonitoringSettings(id))).data }
-export async function updatePublicMonitoringSettings(id: PublicId, enabled: boolean): Promise<PublicMonitoringSettings> { return (await api.put<PublicMonitoringSettings>(endpoints.publicMonitoringSettings(id), { enabled })).data }
-export async function getPublicMonitoringLatest(slug: string): Promise<MonitoringLatest> { return (await api.get<MonitoringLatest>(endpoints.publicMonitoringLatest(slug))).data }
-export async function getPublicMonitoringSeries(slug: string, range: MonitoringRange): Promise<MonitoringSeriesRead> { return (await api.get<MonitoringSeriesRead>(endpoints.publicMonitoringSeries(slug), { params: { range } })).data }
+export async function listScenarioCatalogs(deviceTemplateId?: number): Promise<ScenarioCatalog[]> { return (await api.get<ScenarioCatalog[]>(endpoints.scenarioCatalogs, { params: deviceTemplateId ? { device_template_id: deviceTemplateId } : undefined })).data }
+export async function createScenarioCatalog(payload: ScenarioCatalogInput): Promise<ScenarioCatalog> { return (await api.post<ScenarioCatalog>(endpoints.scenarioCatalogs, payload)).data }
+export async function getScenarioCatalog(id: number): Promise<ScenarioCatalog> { return (await api.get<ScenarioCatalog>(endpoints.scenarioCatalog(id))).data }
+export async function updateScenarioCatalog(id: number, payload: ScenarioCatalogUpdate): Promise<ScenarioCatalog> { return (await api.patch<ScenarioCatalog>(endpoints.scenarioCatalog(id), payload)).data }
+export async function deleteScenarioCatalog(id: number): Promise<void> { await api.delete(endpoints.scenarioCatalog(id)) }
+export async function updateScenarioCatalogItem(id: number, itemId: number, payload: ScenarioCatalogItemUpdate): Promise<ScenarioCatalogItem> { return (await api.patch<ScenarioCatalogItem>(endpoints.scenarioCatalogItem(id, itemId), payload)).data }
+
 export async function listDeviceTemplates(): Promise<DeviceTemplate[]> { return (await api.get<DeviceTemplate[]>(endpoints.templates)).data }
 export async function createDeviceTemplate(payload: DeviceTemplateInput): Promise<DeviceTemplate> { return (await api.post<DeviceTemplate>(endpoints.templates, payload)).data }
 export async function getDeviceTemplate(id: number): Promise<DeviceTemplate> { return (await api.get<DeviceTemplate>(endpoints.template(id))).data }

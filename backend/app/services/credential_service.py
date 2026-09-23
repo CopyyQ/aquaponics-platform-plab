@@ -3,7 +3,7 @@ import json
 import zipfile
 from datetime import UTC, datetime
 
-from fastapi import HTTPException
+from app.core.exceptions import ApplicationError
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -33,7 +33,11 @@ async def issue_credential(
     active = await get_active_credential(db, device.id)
     now = datetime.now(UTC)
     if active and not revoke_existing:
-        raise HTTPException(status_code=409, detail="Thiết bị đã có credential đang hoạt động")
+        raise ApplicationError(
+            "DEVICE_CREDENTIAL_ALREADY_ACTIVE",
+            "Thiết bị đã có credential đang hoạt động",
+            409,
+        )
     if active:
         active.revoked_at = now
 
@@ -76,7 +80,11 @@ async def issue_credential(
 async def revoke_credential(db: AsyncSession, device: Device, actor: User) -> None:
     active = await get_active_credential(db, device.id)
     if not active:
-        raise HTTPException(status_code=404, detail="Không có credential đang hoạt động")
+        raise ApplicationError(
+            "DEVICE_CREDENTIAL_NOT_FOUND",
+            "Không có credential đang hoạt động",
+            404,
+        )
     active.revoked_at = datetime.now(UTC)
     await write_audit(
         db,

@@ -32,6 +32,7 @@ class AlertScenarioCreate(BaseModel):
     recommended_action: str | None = Field(default=None, max_length=4000)
     range_mode: RangeMode | None = None
     range: RangeCondition | None = None
+    desired_state: bool | None = None
     reported_state: bool | None = None
     voltage: RangeCondition | None = None
     current: RangeCondition | None = None
@@ -48,6 +49,7 @@ class AlertScenarioUpdate(BaseModel):
     recommended_action: str | None = Field(default=None, max_length=4000)
     range_mode: RangeMode | None = None
     range: RangeCondition | None = None
+    desired_state: bool | None = None
     reported_state: bool | None = None
     voltage: RangeCondition | None = None
     current: RangeCondition | None = None

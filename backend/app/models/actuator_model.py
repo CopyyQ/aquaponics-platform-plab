@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from sqlalchemy import BigInteger, Boolean, CheckConstraint, Float, Identity, Integer, String, DateTime, Text, UniqueConstraint, func
+from sqlalchemy import BigInteger, Boolean, CheckConstraint, Float, Identity, String, DateTime, Text, UniqueConstraint, func
 from app.db.base import SoftDeleteMixin
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -31,7 +31,6 @@ class ActuatorModel(Base, SoftDeleteMixin):
     data_type: Mapped[str] = mapped_column(String(30), default="BOOLEAN", nullable=False)
     default_state: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
-    sort_order: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     nominal_voltage_v: Mapped[float | None] = mapped_column(Float)
     voltage_tolerance_v: Mapped[float | None] = mapped_column(Float)
     zero_voltage_max_v: Mapped[float | None] = mapped_column(Float)

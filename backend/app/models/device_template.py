@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from sqlalchemy import BigInteger, Boolean, CheckConstraint, Float, ForeignKey, Identity, Index, Integer, String, Text, UniqueConstraint, text
+from sqlalchemy import BigInteger, Boolean, CheckConstraint, Float, ForeignKey, Identity, Index, String, Text, UniqueConstraint, text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base, SoftDeleteMixin, TimestampMixin
@@ -12,6 +12,7 @@ if TYPE_CHECKING:
     from app.models.sensor import SensorModel
     from app.models.actuator_model import ActuatorModel
     from app.models.operational_alert import AlertRuleProfile
+    from app.models.scenario_catalog import ScenarioCatalog
 
 
 class DeviceTemplate(Base, TimestampMixin, SoftDeleteMixin):
@@ -34,13 +35,16 @@ class DeviceTemplate(Base, TimestampMixin, SoftDeleteMixin):
     is_active: Mapped[bool] = mapped_column(default=True, nullable=False)
 
     sensor_mappings: Mapped[list[DeviceTemplateSensor]] = relationship(
-        back_populates="device_template", cascade="all, delete-orphan", order_by="DeviceTemplateSensor.sort_order"
+        back_populates="device_template", cascade="all, delete-orphan", order_by="DeviceTemplateSensor.id"
     )
     actuator_mappings: Mapped[list["DeviceTemplateActuator"]] = relationship(
         back_populates="device_template", cascade="all, delete-orphan",
-        order_by="DeviceTemplateActuator.sort_order",
+        order_by="DeviceTemplateActuator.id",
     )
     devices: Mapped[list["Device"]] = relationship(back_populates="device_template")
+    scenario_catalogs: Mapped[list["ScenarioCatalog"]] = relationship(
+        back_populates="device_template", order_by="ScenarioCatalog.name"
+    )
 
 
 class DeviceTemplateSensor(Base, TimestampMixin):
@@ -68,7 +72,6 @@ class DeviceTemplateSensor(Base, TimestampMixin):
     default_below_risk_level: Mapped[str | None] = mapped_column(String(30))
     default_above_risk_level: Mapped[str | None] = mapped_column(String(30))
     legacy_default_alert_risk_level: Mapped[str | None] = mapped_column("default_alert_risk_level", String(30))
-    sort_order: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     is_required: Mapped[bool] = mapped_column(default=False, server_default="false", nullable=False)
 
     device_template: Mapped[DeviceTemplate] = relationship(back_populates="sensor_mappings")
@@ -95,7 +98,6 @@ class DeviceTemplateActuator(Base, TimestampMixin):
     command_capability: Mapped[str] = mapped_column(String(30), default="ON_OFF", server_default="ON_OFF", nullable=False)
     monitor_current: Mapped[bool] = mapped_column(Boolean, default=False, server_default=text("false"), nullable=False)
     electrical_profile_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("alert_rule_profiles.id", ondelete="RESTRICT"), index=True)
-    sort_order: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     is_required: Mapped[bool] = mapped_column(default=False, nullable=False)
     is_enabled: Mapped[bool] = mapped_column(Boolean, default=True, server_default=text("true"), nullable=False)
 

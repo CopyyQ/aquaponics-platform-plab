@@ -1,21 +1,35 @@
 from datetime import UTC, datetime
 
 from sqlalchemy.ext.asyncio import AsyncSession
-from fastapi import HTTPException
 
 from app.core.enums import ProjectStatus
+from app.core.exceptions import ApplicationError
 from app.models.project import Project
 from app.models.user import User
 from app.services.access_service import get_admin_project_for_lifecycle
-from app.services.project_activity_service import dispatch_project_activity, record_project_activity
+from app.services.project_activity_service import (
+    dispatch_project_activity,
+    record_project_activity,
+)
 
 
 async def disable_project(
-    db: AsyncSession, *, project_id: int, reason: str, actor: User
+    db: AsyncSession,
+    *,
+    project_id: int,
+    reason: str,
+    actor: User,
 ) -> Project:
-    project = await get_admin_project_for_lifecycle(db, project_id)
+    project = await get_admin_project_for_lifecycle(
+        db,
+        project_id,
+    )
     if project.status == ProjectStatus.DISABLED:
-        raise HTTPException(status_code=409, detail="Dự án đã bị vô hiệu hóa")
+        raise ApplicationError(
+            "AQUAPONICS_SYSTEM_ALREADY_DISABLED",
+            "Dự án đã bị vô hiệu hóa",
+            409,
+        )
     old_status = project.status.value
     project.status = ProjectStatus.DISABLED
     project.disabled_at = datetime.now(UTC)
@@ -29,18 +43,38 @@ async def disable_project(
         entity_type="PROJECT",
         entity_id=project.id,
         entity_name=project.name,
-        changes={"status": {"before": old_status, "after": ProjectStatus.DISABLED.value}},
+        changes={
+            "status": {
+                "before": old_status,
+                "after": ProjectStatus.DISABLED.value,
+            }
+        },
     )
     await db.commit()
     await db.refresh(project)
-    await dispatch_project_activity(db, activity_id=activity.id)
+    await dispatch_project_activity(
+        db,
+        activity_id=activity.id,
+    )
     return project
 
 
-async def activate_project(db: AsyncSession, *, project_id: int, actor: User) -> Project:
-    project = await get_admin_project_for_lifecycle(db, project_id)
+async def activate_project(
+    db: AsyncSession,
+    *,
+    project_id: int,
+    actor: User,
+) -> Project:
+    project = await get_admin_project_for_lifecycle(
+        db,
+        project_id,
+    )
     if project.status == ProjectStatus.ACTIVE:
-        raise HTTPException(status_code=409, detail="Dự án đang hoạt động")
+        raise ApplicationError(
+            "AQUAPONICS_SYSTEM_ALREADY_ACTIVE",
+            "Dự án đang hoạt động",
+            409,
+        )
     old_status = project.status.value
     project.status = ProjectStatus.ACTIVE
     project.disabled_at = None
@@ -54,9 +88,17 @@ async def activate_project(db: AsyncSession, *, project_id: int, actor: User) ->
         entity_type="PROJECT",
         entity_id=project.id,
         entity_name=project.name,
-        changes={"status": {"before": old_status, "after": ProjectStatus.ACTIVE.value}},
+        changes={
+            "status": {
+                "before": old_status,
+                "after": ProjectStatus.ACTIVE.value,
+            }
+        },
     )
     await db.commit()
     await db.refresh(project)
-    await dispatch_project_activity(db, activity_id=activity.id)
+    await dispatch_project_activity(
+        db,
+        activity_id=activity.id,
+    )
     return project

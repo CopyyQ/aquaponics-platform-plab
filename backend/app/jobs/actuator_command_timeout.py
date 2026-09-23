@@ -13,22 +13,25 @@ from app.services.project_notification_service import dispatch_actuator_command_
 logger = logging.getLogger(__name__)
 
 
-async def timeout_actuator_commands() -> int:
-    cutoff = datetime.now(UTC) - timedelta(seconds=settings.actuator_command_timeout_seconds)
+async def timeout_actuator_commands(*, now: datetime | None = None) -> int:
+    timestamp = now or datetime.now(UTC)
+    cutoff = timestamp - timedelta(seconds=settings.actuator_command_timeout_seconds)
     async with async_session_factory() as db:
         rows = list((await db.execute(
             select(ActuatorCommand, Actuator, Device)
             .join(Actuator, Actuator.id == ActuatorCommand.actuator_id)
             .join(Device, Device.id == Actuator.device_id)
             .where(
-                ActuatorCommand.status.in_(("PENDING", "PUBLISHED")),
-                ActuatorCommand.requested_at < cutoff,
+                ActuatorCommand.status == "PUBLISHED",
+                ActuatorCommand.published_at.is_not(None),
+                ActuatorCommand.published_at < cutoff,
             )
+            .with_for_update(of=ActuatorCommand, skip_locked=True)
         )).all())
-        now = datetime.now(UTC)
+        timed_out_at = timestamp
         for command, actuator, device in rows:
             command.status = "TIMEOUT"
-            command.timed_out_at = now
+            command.timed_out_at = timed_out_at
             await write_audit(
                 db,
                 user_id=command.requested_by_user_id,

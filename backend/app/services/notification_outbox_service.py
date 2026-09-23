@@ -17,22 +17,12 @@ from app.models.operational_alert import (
 )
 from app.models.project_settings import (
     ProjectNotificationRecipient,
-    ProjectNotificationRiskPolicy,
     ProjectNotificationSettings,
 )
 from app.models.telemetry import TelemetryReading
 from app.services.telegram_notifier import TelegramNotifier
 
 RISK_LABELS = {"EXTREME": "CỰC CAO", "VERY_HIGH": "RẤT CAO", "HIGH": "CAO", "MEDIUM": "TRUNG BÌNH", "LOW_MEDIUM": "THẤP–TRUNG BÌNH", "LOW": "THẤP"}
-RISK_ORDER = {"LOW": 0, "LOW_MEDIUM": 1, "MEDIUM": 2, "HIGH": 3, "VERY_HIGH": 4, "EXTREME": 5}
-RISK_SETTING_FIELDS = {
-    "EXTREME": "risk_extreme_enabled",
-    "VERY_HIGH": "risk_very_high_enabled",
-    "HIGH": "risk_high_enabled",
-    "MEDIUM": "risk_medium_enabled",
-    "LOW_MEDIUM": "risk_low_medium_enabled",
-    "LOW": "risk_low_enabled",
-}
 QUALITY_LABELS = {"VALID": "Hợp lệ", "OUT_OF_RANGE": "Ngoài phạm vi", "INVALID": "Không hợp lệ", "UNVALIDATED": "Chưa được xác thực", "STALE": "Dữ liệu cũ", "NO_DATA": "Không có dữ liệu"}
 COMMAND_LABELS = {"ACKNOWLEDGED": "Đã xác nhận", "FAILED": "Thất bại", "TIMEOUT": "Hết thời gian chờ", "PUBLISHED": "Đã gửi lệnh", "PENDING": "Đang chờ gửi"}
 OPERATOR_LABELS = {"LT": "<", "LTE": "≤", "GT": ">", "GTE": "≥", "EQ": "=", "OUTSIDE": "ngoài"}
@@ -95,7 +85,112 @@ def _duration(value: object) -> str:
     return " ".join(parts)
 
 
+
+
+def _scenario_condition_text(payload: dict) -> str:
+    config = payload.get("condition_config")
+    if not isinstance(config, dict):
+        return "—"
+
+    operator = str(config.get("operator") or "").upper()
+    if isinstance(config.get("value"), (float, int)) and operator:
+        symbol = OPERATOR_LABELS.get(operator, operator)
+        unit = str(payload.get("unit") or "").strip()
+        return f"{symbol} {_number(config['value'])} {unit}".strip()
+
+    minimum = config.get("min")
+    maximum = config.get("max")
+    if isinstance(minimum, (float, int)) or isinstance(maximum, (float, int)):
+        unit = str(payload.get("unit") or "").strip()
+        if isinstance(minimum, (float, int)) and isinstance(maximum, (float, int)):
+            return f"{_number(minimum)} – {_number(maximum)} {unit}".strip()
+        if isinstance(minimum, (float, int)):
+            return f"≥ {_number(minimum)} {unit}".strip()
+        return f"≤ {_number(maximum)} {unit}".strip()
+
+    conditions: list[str] = []
+    desired = config.get("desired_state")
+    reported = config.get("reported_state")
+    if isinstance(desired, bool):
+        conditions.append(f"Yêu cầu={'Bật' if desired else 'Tắt'}")
+    if isinstance(reported, bool):
+        conditions.append(f"Báo về={'Bật' if reported else 'Tắt'}")
+    for field, label, unit in (
+        ("voltage", "Điện áp", "V"),
+        ("current", "Dòng điện", "A"),
+    ):
+        value = config.get(field)
+        if not isinstance(value, dict):
+            continue
+        op = str(value.get("operator") or "").upper()
+        threshold = value.get("value")
+        if op and isinstance(threshold, (float, int)):
+            conditions.append(
+                f"{label} {OPERATOR_LABELS.get(op, op)} {_number(threshold)} {unit}"
+            )
+    return "; ".join(conditions) if conditions else "—"
+
+
+def format_project_scenario_message(payload: dict) -> str:
+    event = str(payload.get("event_type") or "OPEN")
+    risk = str(payload.get("business_risk_level") or "MEDIUM")
+    resource = str(
+        payload.get("resource_name")
+        or payload.get("sensor_name")
+        or payload.get("actuator_name")
+        or "Thiết bị"
+    )
+    lines = [
+        _event_heading(event, risk, canonical=False),
+        "",
+        f"Hệ thống Aquaponics: {payload.get('project_name', '—')}",
+        f"Thiết bị: {payload.get('device_name', '—')}",
+        f"Kịch bản: {payload.get('scenario_name', '—')}",
+        f"Nhánh: {payload.get('branch_name', '—')}",
+        f"Nguồn: {resource}",
+        f"Điều kiện: {_scenario_condition_text(payload)}",
+    ]
+    if payload.get("value") is not None:
+        lines.append(
+            f"Giá trị: {_number(payload['value'])} {payload.get('unit') or ''}".strip()
+        )
+    if payload.get("reported_state") is not None:
+        lines.append(
+            f"Trạng thái báo về: {'Bật' if payload['reported_state'] else 'Tắt'}"
+        )
+    if payload.get("desired_state") is not None:
+        lines.append(
+            f"Trạng thái yêu cầu: {'Bật' if payload['desired_state'] else 'Tắt'}"
+        )
+    if payload.get("voltage_v") is not None:
+        lines.append(f"Điện áp: {_number(payload['voltage_v'])} V")
+    if payload.get("current_a") is not None:
+        lines.append(f"Dòng điện: {_number(payload['current_a'])} A")
+    lines.extend(
+        [
+            f"Bắt đầu: {_display_datetime(payload.get('started_at'))}",
+            f"Đã kéo dài: {_duration(payload.get('duration_seconds'))}",
+        ]
+    )
+    message = str(
+        payload.get("message_template") or payload.get("message") or ""
+    ).strip()
+    if message:
+        lines.extend(["", message])
+    if payload.get("consequence"):
+        lines.extend(["", "Ảnh hưởng:", str(payload["consequence"])])
+    action = payload.get("recommended_action") or payload.get("recommended_actions")
+    if isinstance(action, str) and action.strip():
+        lines.extend(["", "Khuyến nghị xử lý:", action.strip()])
+    elif isinstance(action, list) and action:
+        lines.extend(["", "Khuyến nghị xử lý:"])
+        lines.extend(f"• {item}" for item in action)
+    return "\n".join(lines)
+
+
 def format_operational_message(payload: dict) -> str:
+    if payload.get("scenario_name") and payload.get("branch_name"):
+        return format_project_scenario_message(payload)
     if payload.get("resource_type") and payload.get("metric_type"):
         return format_canonical_operational_message(payload)
     event = str(payload.get("event_type") or "OPEN")
@@ -216,13 +311,18 @@ async def resolve_notification_recipients(
 async def evaluate_notification_policy(
     db: AsyncSession, *, project_id: int, source_type: str, event_type: str, risk: str | None
 ) -> str | None:
-    """Return a precise skip reason, or ``None`` when delivery is allowed.
+    """Return a precise skip reason, or ``None`` when Telegram delivery is allowed.
 
-    Settings own the global channel switch. Risk policies own incident risk and
-    lifecycle switches. Project activity has no alert risk, so it uses only the
-    global channel switch rather than inventing one.
+    Risk remains incident metadata for operator context, but it no longer gates
+    Telegram. OPEN is fixed behavior whenever the channel is enabled. RECOVERED
+    is the only optional lifecycle message.
     """
-    settings = await db.scalar(select(ProjectNotificationSettings).where(ProjectNotificationSettings.project_id == project_id))
+    del risk
+    settings = await db.scalar(
+        select(ProjectNotificationSettings).where(
+            ProjectNotificationSettings.project_id == project_id
+        )
+    )
     if settings is None:
         return "PROJECT_NOTIFICATION_NOT_CONFIGURED"
     if not settings.enabled:
@@ -230,109 +330,12 @@ async def evaluate_notification_policy(
     if not settings.telegram_enabled:
         return "TELEGRAM_DISABLED"
     if source_type != "INCIDENT":
-        return "PUSH_ONLY_ALERT_LIFECYCLE"
-    policy = await db.scalar(select(ProjectNotificationRiskPolicy).where(
-        ProjectNotificationRiskPolicy.project_id == project_id,
-        ProjectNotificationRiskPolicy.risk_level == risk,
-    ))
-    risk_allowed = policy.telegram_enabled if policy else _risk_enabled(settings, risk or "")
-    if not risk_allowed:
-        return "RISK_DISABLED"
-    if event_type not in TELEGRAM_PUSH_INCIDENT_EVENTS:
-        return "EVENT_DISABLED"
-    event_allowed = {
-        "OPEN": policy.notify_on_open if policy else settings.notify_alert_opened,
-        "RECOVERED": policy.notify_on_recovery if policy else settings.notify_alert_recovered,
-    }[event_type]
-    return None if event_allowed else "EVENT_DISABLED"
-
-
-async def next_notification_generation(db: AsyncSession, *, project_id: int) -> int:
-    settings_row = await db.scalar(
-        select(ProjectNotificationSettings)
-        .where(ProjectNotificationSettings.project_id == project_id)
-        .with_for_update()
-    )
-    if settings_row is None:
-        settings_row = ProjectNotificationSettings(project_id=project_id)
-        db.add(settings_row)
-        await db.flush()
-    settings_row.notification_generation += 1
-    await db.flush()
-    return settings_row.notification_generation
-
-
-async def reconcile_active_incident_notifications(
-    db: AsyncSession,
-    *,
-    project_id: int,
-    generation: int,
-    reason: str,
-    recipient_ids: set[int] | None = None,
-    risk_levels: set[str] | None = None,
-    skip_previously_informed: bool = True,
-) -> int:
-    """Queue recipient-scoped ACTIVE_SYNC without waiting for new telemetry."""
-    incidents = list((await db.scalars(select(OperationalIncident).where(
-        OperationalIncident.project_id == project_id,
-        OperationalIncident.status.in_(("OPEN", "ACKNOWLEDGED")),
-    ))).all())
-    if risk_levels is not None:
-        incidents = [item for item in incidents if item.business_risk_level_snapshot in risk_levels]
-    recipient_query = select(ProjectNotificationRecipient).where(
-        ProjectNotificationRecipient.project_id == project_id,
-        ProjectNotificationRecipient.enabled.is_(True),
-    )
-    if recipient_ids is not None:
-        recipient_query = recipient_query.where(ProjectNotificationRecipient.id.in_(recipient_ids))
-    recipients = list((await db.scalars(recipient_query)).all())
-    targets: list[ProjectNotificationRecipient | None] = recipients or ([None] if recipient_ids is None else [])
-    inserted = 0
-    for incident in incidents:
-        for recipient in targets:
-            if recipient is not None and skip_previously_informed:
-                informed = await db.scalar(
-                    select(NotificationDelivery.id)
-                    .where(
-                        NotificationDelivery.incident_id == incident.id,
-                        NotificationDelivery.recipient_id == recipient.id,
-                        NotificationDelivery.status == "SENT",
-                    )
-                    .limit(1)
-                )
-                if informed is not None:
-                    continue
-            recipient_key = recipient.id if recipient is not None else "none"
-            result = await db.execute(
-                insert(NotificationOutbox)
-                .values(
-                    incident_id=incident.id,
-                    project_id=project_id,
-                    source_type="INCIDENT",
-                    target_recipient_id=recipient.id if recipient is not None else None,
-                    event_type="ACTIVE_SYNC",
-                    idempotency_key=f"incident:{incident.id}:ACTIVE_SYNC:generation:{generation}:recipient:{recipient_key}",
-                    payload_snapshot={
-                        **incident.trigger_snapshot,
-                        "incident_id": incident.id,
-                        "event_type": "ACTIVE_SYNC",
-                        "sync_reason": reason,
-                        "notification_generation": generation,
-                        "target_recipient_id": recipient.id if recipient is not None else None,
-                        "business_risk_level": incident.business_risk_level_snapshot,
-                        "started_at": incident.started_at.isoformat(),
-                        "opened_at": incident.opened_at.isoformat() if incident.opened_at else None,
-                        "duration_seconds": max(0, int((datetime.now(UTC) - incident.started_at).total_seconds())),
-                    },
-                    status="PENDING",
-                    available_at=datetime.now(UTC),
-                    attempt_count=0,
-                )
-                .on_conflict_do_nothing(index_elements=["idempotency_key"])
-                .returning(NotificationOutbox.id)
-            )
-            inserted += int(result.scalar_one_or_none() is not None)
-    return inserted
+        return "INCIDENT_ONLY"
+    if event_type == "OPEN":
+        return None
+    if event_type == "RECOVERED":
+        return None if settings.notify_alert_recovered else "RECOVERY_DISABLED"
+    return "EVENT_DISABLED"
 
 
 async def enqueue_project_activity_notification(
@@ -407,15 +410,6 @@ async def _hydrate_recovery_payload(
 def _delivery_identity(outbox: NotificationOutbox, incident: OperationalIncident | None) -> str:
     if incident is None:
         return f"{outbox.source_type.lower()}:{outbox.idempotency_key}"
-    if outbox.event_type == "REMINDER":
-        sequence = outbox.payload_snapshot.get("reminder_sequence") or outbox.idempotency_key.rsplit(":", 1)[-1]
-        return f"incident:{incident.id}:REMINDER:{sequence}"
-    if outbox.event_type == "ESCALATED":
-        risk = outbox.payload_snapshot.get("business_risk_level") or incident.business_risk_level_snapshot
-        return f"incident:{incident.id}:ESCALATED:{risk}"
-    if outbox.event_type == "ACTIVE_SYNC":
-        generation = outbox.payload_snapshot.get("notification_generation", 0)
-        return f"incident:{incident.id}:ACTIVE_SYNC:generation:{generation}"
     return f"incident:{incident.id}:{outbox.event_type}"
 
 
@@ -493,6 +487,35 @@ async def process_notification_outbox(db: AsyncSession, *, notifier: TelegramNot
                 outbox.processed_at = now
                 processed += 1
                 continue
+        if incident is not None and outbox.event_type == "RECOVERED":
+            informed_recipient_ids = set(
+                (
+                    await db.scalars(
+                        select(NotificationDelivery.recipient_id)
+                        .join(
+                            NotificationOutbox,
+                            NotificationOutbox.id == NotificationDelivery.outbox_id,
+                        )
+                        .where(
+                            NotificationDelivery.incident_id == incident.id,
+                            NotificationDelivery.channel == "TELEGRAM",
+                            NotificationDelivery.status == "SENT",
+                            NotificationDelivery.recipient_id.is_not(None),
+                            NotificationOutbox.event_type == "OPEN",
+                        )
+                    )
+                ).all()
+            )
+            recipients = [
+                item for item in recipients if item.id in informed_recipient_ids
+            ]
+            if not recipients:
+                outbox.status = "SKIPPED"
+                outbox.skip_reason = "NO_PRIOR_OPEN_DELIVERY"
+                await _record_skipped_delivery(db, outbox, incident, outbox.skip_reason)
+                outbox.processed_at = now
+                processed += 1
+                continue
         if not recipients:
             outbox.status = "SKIPPED"
             outbox.skip_reason = "NO_RECIPIENT"
@@ -508,7 +531,7 @@ async def process_notification_outbox(db: AsyncSession, *, notifier: TelegramNot
             processed += 1
             continue
         all_sent = True
-        defensive_deduplication = outbox.event_type in {"OPEN", "RECOVERED", "RESOLVED", "ESCALATED"}
+        defensive_deduplication = outbox.event_type in {"OPEN", "RECOVERED"}
         duplicate_for_all = bool(recipients) and defensive_deduplication
         payload = _payload_at_delivery(outbox, incident, now) if incident else {**outbox.payload_snapshot, "event_type": outbox.event_type}
         if incident is not None and outbox.event_type == "RECOVERED":
@@ -603,57 +626,3 @@ async def _record_skipped_delivery(db: AsyncSession, outbox: NotificationOutbox,
             status="SKIPPED", attempt_count=0, error_category=reason,
         ).on_conflict_do_nothing(index_elements=["idempotency_key"])
     )
-
-
-def _risk_enabled(notification_settings: ProjectNotificationSettings, risk: str) -> bool:
-    field = RISK_SETTING_FIELDS.get(risk)
-    if field is None:
-        return False
-    flags = [bool(getattr(notification_settings, name)) for name in RISK_SETTING_FIELDS.values()]
-    if all(flags) and notification_settings.minimum_business_risk_level != "LOW":
-        return RISK_ORDER.get(risk, -1) >= RISK_ORDER.get(notification_settings.minimum_business_risk_level, 0)
-    return bool(getattr(notification_settings, field))
-
-
-async def enqueue_due_reminders(db: AsyncSession, *, now: datetime | None = None) -> int:
-    now = now or datetime.now(UTC)
-    rows = (
-        await db.execute(
-            select(OperationalIncident, ProjectNotificationSettings, ProjectNotificationRiskPolicy)
-            .join(ProjectNotificationSettings, ProjectNotificationSettings.project_id == OperationalIncident.project_id)
-            .join(ProjectNotificationRiskPolicy, (ProjectNotificationRiskPolicy.project_id == OperationalIncident.project_id) & (ProjectNotificationRiskPolicy.risk_level == OperationalIncident.business_risk_level_snapshot))
-            .where(
-                OperationalIncident.status.in_(("OPEN", "ACKNOWLEDGED")),
-                ProjectNotificationSettings.telegram_enabled.is_(True),
-                ProjectNotificationRiskPolicy.telegram_enabled.is_(True),
-                ProjectNotificationRiskPolicy.reminder_enabled.is_(True),
-                ProjectNotificationRiskPolicy.max_reminders > 0,
-            )
-        )
-    ).all()
-    inserted = 0
-    for incident, notification_settings, policy in rows:
-        del notification_settings
-        if incident.opened_at is None or (incident.status == "ACKNOWLEDGED" and policy.stop_reminders_on_ack):
-            continue
-        reminders = list((await db.scalars(select(NotificationOutbox).where(NotificationOutbox.incident_id == incident.id, NotificationOutbox.event_type == "REMINDER").order_by(NotificationOutbox.id))).all())
-        sent_count = len(reminders)
-        sequence = sent_count + 1
-        if sequence > policy.max_reminders:
-            continue
-        due_at = (
-            reminders[-1].available_at + timedelta(seconds=policy.repeat_interval_seconds)
-            if reminders
-            else incident.opened_at + timedelta(seconds=policy.initial_reminder_seconds)
-        )
-        if now < due_at:
-            continue
-        result = await db.execute(
-            insert(NotificationOutbox)
-            .values(incident_id=incident.id, project_id=incident.project_id, event_type="REMINDER", idempotency_key=f"incident:{incident.id}:REMINDER:{sequence}", payload_snapshot={**incident.trigger_snapshot, "incident_id": incident.id, "event_type": "REMINDER", "reminder_sequence": sequence, "technical_severity": incident.technical_severity, "business_risk_level": incident.business_risk_level_snapshot, "started_at": incident.started_at.isoformat(), "opened_at": incident.opened_at.isoformat(), "duration_seconds": max(0, int((now - incident.started_at).total_seconds()))}, status="PENDING", available_at=now, attempt_count=0)
-            .on_conflict_do_nothing(index_elements=["idempotency_key"])
-            .returning(NotificationOutbox.id)
-        )
-        inserted += int(result.scalar_one_or_none() is not None)
-    await db.flush()
-    return inserted

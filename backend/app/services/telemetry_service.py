@@ -22,6 +22,10 @@ from app.services.operational_incident_service import (
 from app.services.project_notification_service import (
     dispatch_device_connectivity_transition,
 )
+from app.services.project_scenario_evaluator import (
+    device_uses_project_scenarios,
+    evaluate_active_sensor_scenario,
+)
 
 
 async def ingest_telemetry(
@@ -93,16 +97,27 @@ async def ingest_telemetry(
         sensor.last_seen_at = now
         await normalize_active_alert(db, sensor.id, AlertType.SENSOR_OFFLINE, now)
         quality = classify_measurement_quality(model.code, reading.value)[0]
-        await evaluate_sensor_threshold_incident(
-            db,
-            device=device,
-            sensor=sensor,
-            sensor_model=model,
-            value=reading.value,
-            quality=quality,
-            recorded_at=reading.recorded_at,
-            received_at=now,
-        )
+        if await device_uses_project_scenarios(db, device_id=device.id):
+            await evaluate_active_sensor_scenario(
+                db,
+                device=device,
+                sensor=sensor,
+                value=reading.value,
+                quality=quality,
+                recorded_at=reading.recorded_at,
+                received_at=now,
+            )
+        else:
+            await evaluate_sensor_threshold_incident(
+                db,
+                device=device,
+                sensor=sensor,
+                sensor_model=model,
+                value=reading.value,
+                quality=quality,
+                recorded_at=reading.recorded_at,
+                received_at=now,
+            )
     if accepted + duplicates > 0:
         device.status = DeviceStatus.ONLINE
         device.last_seen_at = now

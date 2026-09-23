@@ -11,7 +11,7 @@ from app.services.project_role_service import (
     sync_project_role_assignment,
 )
 
-MEMBER_ROLE_CODES = frozenset({"TECHNICIAN", "VIEWER"})
+MEMBER_ROLE_CODES = frozenset({"VIEWER"})
 
 
 class MembershipError(Exception):
@@ -43,7 +43,7 @@ async def _system(db: AsyncSession, system_id: int, *, active: bool = False) -> 
 
 def _validate_member_role(role: str) -> None:
     if role not in MEMBER_ROLE_CODES:
-        raise MembershipError("INVALID_SYSTEM_MEMBER_ROLE", "Vai trò thành viên chỉ có thể là TECHNICIAN hoặc VIEWER", 422)
+        raise MembershipError("INVALID_SYSTEM_MEMBER_ROLE", "Vai trò thành viên chỉ có thể là VIEWER", 422)
 
 
 async def assign_system_member(

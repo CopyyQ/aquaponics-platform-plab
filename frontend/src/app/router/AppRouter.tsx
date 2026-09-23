@@ -25,7 +25,6 @@ const ProjectMembersPage = lazyNamed(() => import("@/pages/project-members/Proje
 const ProjectAlertsPage = lazyNamed(() => import("@/pages/project-alerts/ProjectAlertsPage"), "ProjectAlertsPage")
 const ProjectNotificationsPage = lazyNamed(() => import("@/pages/project-notifications/ProjectNotificationsPage"), "ProjectNotificationsPage")
 const ProjectSettingsPage = lazyNamed(() => import("@/pages/project-settings/ProjectSettingsPage"), "ProjectSettingsPage")
-const PublicMonitoringPage = lazyNamed(() => import("@/pages/public-monitoring/PublicMonitoringPage"), "PublicMonitoringPage")
 const DeviceDetailPage = lazyNamed(() => import("@/pages/device-detail/DeviceDetailPage"), "DeviceDetailPage")
 const SensorDetailPage = lazyNamed(() => import("@/pages/sensor-detail/SensorDetailPage"), "SensorDetailPage")
 const AdminOverviewPage = lazyNamed(() => import("@/pages/admin-overview/AdminOverviewPage"), "AdminOverviewPage")
@@ -106,16 +105,7 @@ const adminRoutes = [
   },
 ]
 
-const publicGatewayRoutes = [
-  { path: "/", element: <PageSuspense><PublicMonitoringPage /></PageSuspense> },
-  { path: "*", element: <PageSuspense><NotFoundPage /></PageSuspense> },
-]
-
-const router = createBrowserRouter(
-  import.meta.env.VITE_PUBLIC_MONITORING_GATEWAY === "true"
-    ? publicGatewayRoutes
-    : adminRoutes,
-)
+const router = createBrowserRouter(adminRoutes)
 
 export function AppRouter() {
   return <RouterProvider router={router} />

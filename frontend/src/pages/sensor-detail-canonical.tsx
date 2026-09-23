@@ -5,13 +5,12 @@ import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom"
 import {
   deleteSensor, getSensor, getSensorModel, getSensorTelemetry, queryKeys, updateSensor,
 } from "@/api/resources"
-import type { MonitoringRange, SensorUpdate, ThresholdAlertConfigInput } from "@/api/contracts"
+import type { MonitoringRange, SensorUpdate } from "@/api/contracts"
 import { errorMessage } from "@/api/client"
 import { useAuth } from "@/app/auth"
 import { buildMonitoringWindow, monitoringExpectedInterval, monitoringRangeLabel } from "@/entities/telemetry/lib/monitoring-range"
 import { SensorChartRenderer } from "@/features/sensor-monitoring/components/SensorChartRenderer"
 import { MonitoringRangeSelector } from "@/features/view-device-monitoring-history/ui/MonitoringRangeSelector"
-import { AlertScenarioSection } from "@/features/alert-scenarios/AlertScenarioSection"
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription,
   AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger,
@@ -29,18 +28,6 @@ const ranges: readonly MonitoringRange[] = ["1h", "6h", "12h", "24h", "30d"]
 
 function isMonitoringRange(value: string | null): value is MonitoringRange {
   return value !== null && ranges.some((range) => range === value)
-}
-
-/** Compatibility mapper for legacy threshold consumers during scenario migration. */
-export function thresholdDraftFromResponse(config: ThresholdAlertConfigInput): ThresholdAlertConfigInput {
-  return {
-    enabled: config.enabled, lower_threshold: config.lower_threshold, upper_threshold: config.upper_threshold,
-    below_risk_level: config.below_risk_level, above_risk_level: config.above_risk_level,
-    below_message: config.below_message, above_message: config.above_message,
-    below_consequence: config.below_consequence, above_consequence: config.above_consequence,
-    below_recommended_actions: config.below_recommended_actions,
-    above_recommended_actions: config.above_recommended_actions, delay_seconds: config.delay_seconds,
-  }
 }
 
 export function SensorDetailPage() {
@@ -109,7 +96,6 @@ export function SensorDetailPage() {
 
     <Card><CardHeader><div className="flex flex-wrap items-center justify-between gap-3"><CardTitle>Telemetry · {monitoringRangeLabel(range)}</CardTitle><MonitoringRangeSelector range={range} onRangeChange={(next) => setSearchParams({ range: next }, { replace: true })} /></div></CardHeader><CardContent>{telemetry.isLoading ? <Skeleton className="h-72" /> : telemetry.isError ? <EmptyState icon={Activity} title="Không thể tải telemetry" description={errorMessage(telemetry.error)} /> : orderedTelemetry.length ? <SensorChartRenderer modelCode={model.data?.code} data={orderedTelemetry.map((item) => ({ timestamp: item.recorded_at, value: item.value }))} unit={model.data?.unit} lastUpdatedAt={orderedTelemetry.at(-1)?.recorded_at} rangeLabel={monitoringRangeLabel(range)} expectedIntervalMs={monitoringExpectedInterval(range)} /> : <EmptyState icon={Activity} title="Chưa có telemetry" description="Không có dữ liệu trong khoảng truy vấn hiện tại." />}</CardContent></Card>
 
-    {can("sensors.thresholds.read") ? <AlertScenarioSection target="SENSOR" systemId={systemId} deviceId={deviceId} resourceId={sensorId} canCreate={can("sensors.thresholds.create")} canUpdate={can("sensors.thresholds.update")} canDelete={can("sensors.thresholds.delete")} /> : null}
   </div>
 }
 

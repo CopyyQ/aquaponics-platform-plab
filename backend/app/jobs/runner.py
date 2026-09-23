@@ -5,7 +5,9 @@ from datetime import UTC, datetime
 
 from app.core.config import settings
 from app.core.enums import AggregatePeriod
+from app.jobs.actuator_command_dispatcher import dispatch_actuator_commands_once
 from app.jobs.actuator_command_timeout import timeout_actuator_commands
+from app.jobs.auth_cleanup import cleanup_auth_state
 from app.jobs.notification_outbox import dispatch_operational_notifications
 from app.jobs.offline_scanner import scan_offline_state
 from app.jobs.project_health_evaluator import evaluate_project_health
@@ -31,6 +33,7 @@ async def run_scheduler_cycle(now: datetime | None = None) -> bool:
     results = [
         await _run_job("offline_scanner", scan_offline_state),
         await _run_job("actuator_command_timeout", timeout_actuator_commands),
+        await _run_job("auth_cleanup", cleanup_auth_state),
         await _run_job("notification_outbox", dispatch_operational_notifications),
         await _run_job("telemetry_aggregation_hour", lambda: aggregate_period(AggregatePeriod.HOUR)),
     ]
@@ -46,9 +49,23 @@ async def run_scheduler_cycle(now: datetime | None = None) -> bool:
     return all(results)
 
 
+async def run_command_dispatch_loop() -> None:
+    while True:
+        try:
+            await dispatch_actuator_commands_once()
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.exception("event=actuator_command_dispatch_cycle_failed")
+        await asyncio.sleep(settings.actuator_command_dispatch_interval_seconds)
+
+
 async def background_loop() -> None:
     telegram_task = asyncio.create_task(
         run_telegram_bot_loop(), name="telegram_bot_long_poll"
+    )
+    command_dispatch_task = asyncio.create_task(
+        run_command_dispatch_loop(), name="actuator_command_dispatch"
     )
     try:
         while True:
@@ -67,9 +84,11 @@ async def background_loop() -> None:
                 logger.exception("event=scheduler_cycle_failed")
             await asyncio.sleep(settings.job_interval_seconds)
     finally:
-        telegram_task.cancel()
-        with suppress(asyncio.CancelledError):
-            await telegram_task
+        for task in (telegram_task, command_dispatch_task):
+            task.cancel()
+        for task in (telegram_task, command_dispatch_task):
+            with suppress(asyncio.CancelledError):
+                await task
 
 
 def main() -> None:
