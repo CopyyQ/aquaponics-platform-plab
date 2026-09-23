@@ -506,8 +506,9 @@ async def seed_device_template(db: AsyncSession) -> int:
             code=CANONICAL_DEVICE_TEMPLATE_CODE,
             name=CANONICAL_DEVICE_TEMPLATE_NAME,
             description=(
-                "Thiết bị chuẩn của hệ thống Aquaponics gồm 12 cảm biến "
-                "và 8 cơ cấu chấp hành."
+                "Template chuẩn của hệ thống Aquaponics gồm 12 loại cảm biến "
+                "và 8 loại cơ cấu chấp hành; số instance thực tế trên Device "
+                "có thể nhiều hơn."
             ),
             is_active=True,
         )
@@ -516,8 +517,9 @@ async def seed_device_template(db: AsyncSession) -> int:
     else:
         template.name = CANONICAL_DEVICE_TEMPLATE_NAME
         template.description = (
-            "Thiết bị chuẩn của hệ thống Aquaponics gồm 12 cảm biến "
-            "và 8 cơ cấu chấp hành."
+            "Template chuẩn của hệ thống Aquaponics gồm 12 loại cảm biến "
+            "và 8 loại cơ cấu chấp hành; số instance thực tế trên Device "
+            "có thể nhiều hơn."
         )
         template.is_active = True
         template.is_deleted = False

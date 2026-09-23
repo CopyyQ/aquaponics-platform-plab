@@ -23,6 +23,33 @@ const VALID_QUALITIES = new Set(["VALID", "OUT_OF_RANGE", "INVALID", "UNVALIDATE
 const CONNECTION_STATUSES = new Set(["WAITING_CONNECTION", "ONLINE", "OFFLINE", "DISABLED"])
 const THRESHOLD_STATES = new Set(["BELOW", "NORMAL", "ABOVE", "UNCONFIGURED"])
 
+export function deriveMonitoringHealthStatus({
+  criticalAlertCount,
+  enabledSensorCount,
+  reportingSensorCount,
+  staleSensorCount,
+  noDataSensorCount,
+  hasReasons,
+}: {
+  criticalAlertCount: number
+  enabledSensorCount: number
+  reportingSensorCount: number
+  staleSensorCount: number
+  noDataSensorCount: number
+  hasReasons: boolean
+}): ProjectMonitoringSummary["health"]["status"] {
+  if (criticalAlertCount > 0) return "CRITICAL"
+
+  const allEnabledSensorsHaveNoData =
+    enabledSensorCount > 0 &&
+    reportingSensorCount === 0 &&
+    staleSensorCount === 0 &&
+    noDataSensorCount === enabledSensorCount
+
+  if (allEnabledSensorsHaveNoData) return "NO_DATA"
+  return hasReasons ? "WARNING" : "HEALTHY"
+}
+
 function connectionStatus(value: string): MonitoringDevice["connection_status"] {
   return CONNECTION_STATUSES.has(value) ? value as MonitoringDevice["connection_status"] : "WAITING_CONNECTION"
 }
@@ -263,13 +290,14 @@ export function adaptCanonicalMonitoring(latest: MonitoringLatest, alerts: Alert
   if (noDataSensors.length) reasons.push({ code: "SENSOR_NO_DATA", severity: "WARNING", message: `${noDataSensors.length} cảm biến chưa có dữ liệu.` })
   if (warningAlerts.length) reasons.push({ code: "WARNING_ALERT", severity: "WARNING", message: `${warningAlerts.length} cảnh báo cần theo dõi.` })
 
-  const healthStatus: ProjectMonitoringSummary["health"]["status"] = criticalAlerts.length
-    ? "CRITICAL"
-    : enabledSensors.length > 0 && reportingSensors.length === 0
-      ? "NO_DATA"
-      : reasons.length
-        ? "WARNING"
-        : "HEALTHY"
+  const healthStatus = deriveMonitoringHealthStatus({
+    criticalAlertCount: criticalAlerts.length,
+    enabledSensorCount: enabledSensors.length,
+    reportingSensorCount: reportingSensors.length,
+    staleSensorCount: staleSensors.length,
+    noDataSensorCount: noDataSensors.length,
+    hasReasons: reasons.length > 0,
+  })
 
   const deviceHealth: ProjectDeviceHealth[] = devices.map((device) => ({
     id: device.id,
