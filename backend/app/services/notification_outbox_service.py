@@ -131,6 +131,144 @@ def _scenario_condition_text(payload: dict) -> str:
     return "; ".join(conditions) if conditions else "—"
 
 
+_WORKBOOK_SCENARIO_NAME = "Kịch bản vận hành Aquaponics"
+_WORKBOOK_RESOURCE_LABELS = {
+    "AERATION_PUMP": "THIẾT BỊ CHẤP HÀNH - Máy sủi Oxy",
+    "FISH_TANK_PUMP": "THIẾT BỊ CHẤP HÀNH - Bơm bể cá",
+    "BIOFILTER_PUMP": "THIẾT BỊ CHẤP HÀNH - Bơm tưới giàn",
+    "GROW_LIGHT": "THIẾT BỊ CHẤP HÀNH - Đèn chiếu sáng",
+    "WATER_LEVEL": "CẢM BIẾN - Mức nước bể lọc vi sinh",
+    "WATER_LEVELW2": "CẢM BIẾN - Mức nước bể cá",
+    "PH": "CẢM BIẾN - Mức pH của bể cá",
+    "WATER_TEMPERATURE": "CẢM BIẾN - Nhiệt độ nước trong bể cá",
+    "TDS": "CẢM BIẾN - Nồng độ dinh dưỡng",
+}
+_WORKBOOK_ACTUATOR_CODES = {
+    "AERATION_PUMP",
+    "FISH_TANK_PUMP",
+    "BIOFILTER_PUMP",
+    "GROW_LIGHT",
+}
+_WORKBOOK_WATER_LEVEL_CONSEQUENCE = (
+    "Gây hại cho hệ vi sinh trong bể, và lưu lượng nước vi sinh không tuần hoàn "
+    "lên Giàn CẦN KHẮC PHỤC trong 3h tới."
+)
+
+
+def _scenario_resource_code(payload: dict) -> str:
+    return str(
+        payload.get("sensor_code") or payload.get("actuator_code") or ""
+    ).strip().upper()
+
+
+def _scenario_operator(payload: dict) -> str:
+    config = payload.get("condition_config")
+    if isinstance(config, dict):
+        operator = config.get("operator")
+        if operator:
+            return str(operator).upper()
+        range_config = config.get("range")
+        value = payload.get("value")
+        if isinstance(range_config, dict) and isinstance(value, (float, int)):
+            minimum = range_config.get("min")
+            maximum = range_config.get("max")
+            if isinstance(minimum, (float, int)) and value < minimum:
+                return "LT"
+            if isinstance(maximum, (float, int)) and value > maximum:
+                return "GT"
+    return str(payload.get("operator") or "").upper()
+
+
+def _workbook_action_lines(payload: dict) -> list[str]:
+    value = payload.get("recommended_action") or payload.get("recommended_actions")
+    raw_lines: list[str] = []
+    if isinstance(value, str):
+        raw_lines = value.splitlines()
+    elif isinstance(value, list):
+        raw_lines = [str(item) for item in value]
+
+    lines: list[str] = []
+    for raw in raw_lines:
+        item = raw.strip()
+        if not item:
+            continue
+        if item.startswith("-"):
+            item = item[1:].strip()
+        item = item.rstrip("/").strip()
+        if item:
+            lines.append(f"- {item}")
+    return lines
+
+
+def _format_aquaponics_workbook_scenario_message(payload: dict) -> str | None:
+    if str(payload.get("scenario_name") or "") != _WORKBOOK_SCENARIO_NAME:
+        return None
+
+    code = _scenario_resource_code(payload)
+    resource_label = _WORKBOOK_RESOURCE_LABELS.get(code)
+    if resource_label is None:
+        return None
+
+    lines = [
+        "TÌNH TRẠNG HỆ THỐNG",
+        f"DỰ ÁN: {payload.get('project_name', '—')}",
+        resource_label,
+        "LỖI BẤT THƯỜNG",
+    ]
+
+    if code in _WORKBOOK_ACTUATOR_CODES:
+        state = payload.get("reported_state")
+        if not isinstance(state, bool):
+            state = payload.get("desired_state")
+        lines.extend(
+            [
+                f"Trạng thái: {'Bật' if state is True else 'Tắt' if state is False else '—'}",
+                f"Điện áp: {_number(payload.get('voltage_v'))} VDC",
+                f"Dòng điện: {_number(payload.get('current_a'))} A",
+            ]
+        )
+    elif code == "PH":
+        direction = "dưới" if _scenario_operator(payload) in {"LT", "LTE"} else "trên"
+        lines.append(
+            f"Giá trị pH: {_number(payload.get('value'))} - Vượt ngưỡng {direction}"
+        )
+    elif code == "WATER_TEMPERATURE":
+        direction = "dưới" if _scenario_operator(payload) in {"LT", "LTE"} else "trên"
+        lines.append(
+            f"Giá trị nhiệt độ: {_number(payload.get('value'))} - Vượt ngưỡng {direction}"
+        )
+    elif code == "TDS":
+        lines.append(
+            f"Giá trị dinh dưỡng: {_number(payload.get('value'))} - Vượt ngưỡng dưới"
+        )
+    elif code in {"WATER_LEVEL", "WATER_LEVELW2"}:
+        tank = "bể cá" if code == "WATER_LEVELW2" else "bể lọc vi sinh"
+        lines.extend(
+            [
+                "Trạng thái: Bật",
+                f"Mức nước {tank} THẤP: {_number(payload.get('value'))}%",
+            ]
+        )
+
+    lines.append(
+        f"Thời gian: {_display_datetime(payload.get('recorded_at') or payload.get('started_at'))}"
+    )
+
+    consequence = (
+        _WORKBOOK_WATER_LEVEL_CONSEQUENCE
+        if code in {"WATER_LEVEL", "WATER_LEVELW2"}
+        else str(payload.get("consequence") or "").strip()
+    )
+    if consequence:
+        lines.append(f"Ảnh hưởng: {consequence}")
+
+    actions = _workbook_action_lines(payload)
+    if actions:
+        lines.append("Khắc phục:")
+        lines.extend(actions)
+    return "\n".join(lines)
+
+
 def format_project_scenario_message(payload: dict) -> str:
     event = str(payload.get("event_type") or "OPEN")
     risk = str(payload.get("business_risk_level") or "MEDIUM")
@@ -189,7 +327,12 @@ def format_project_scenario_message(payload: dict) -> str:
 
 
 def format_operational_message(payload: dict) -> str:
+    if str(payload.get("event_type") or "OPEN") == "RECOVERED":
+        return format_recovered_operational_message(payload)
     if payload.get("scenario_name") and payload.get("branch_name"):
+        workbook_message = _format_aquaponics_workbook_scenario_message(payload)
+        if workbook_message is not None:
+            return workbook_message
         return format_project_scenario_message(payload)
     if payload.get("resource_type") and payload.get("metric_type"):
         return format_canonical_operational_message(payload)
@@ -242,7 +385,13 @@ def format_recovered_operational_message(payload: dict) -> str:
     elif payload.get("threshold") is not None:
         direction = str(payload.get("threshold_direction") or "")
         operator = "<" if direction == "BELOW" else ">" if direction == "ABOVE" else ""
-        lines.append(f"Điều kiện cảnh báo trước đó: {operator} {_number(payload['threshold'])} {payload.get('unit') or ''}".strip())
+        if not operator:
+            scenario_operator = _scenario_operator(payload)
+            operator = OPERATOR_LABELS.get(scenario_operator, scenario_operator)
+        lines.append(
+            f"Điều kiện cảnh báo trước đó: {operator} {_number(payload['threshold'])} "
+            f"{payload.get('unit') or ''}".strip()
+        )
     lines.append(f"Phục hồi lúc: {_display_datetime(payload.get('recorded_at'))}")
     lines.append(f"Sự cố kéo dài: {_duration(payload.get('duration_seconds'))}")
     return "\n".join(lines)

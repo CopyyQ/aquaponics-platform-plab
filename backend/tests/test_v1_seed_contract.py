@@ -32,6 +32,10 @@ def test_canonical_sensor_thresholds_match_business_source() -> None:
         branch["key"]: branch
         for branch in DEFAULT_SENSOR_SCENARIOS["WATER_LEVEL"]["branches"]
     }
+    fish_tank_water_level = {
+        branch["key"]: branch
+        for branch in DEFAULT_SENSOR_SCENARIOS["WATER_LEVELW2"]["branches"]
+    }
 
     assert ph["PH_LOW"]["condition_config"]["operator"] == "LT"
     assert ph["PH_LOW"]["condition_config"]["value"] == 6
@@ -39,7 +43,10 @@ def test_canonical_sensor_thresholds_match_business_source() -> None:
     assert ph["PH_HIGH"]["condition_config"]["value"] == 7.5
     assert water_level["WATER_LEVEL_LOW"]["condition_config"]["operator"] == "LT"
     assert water_level["WATER_LEVEL_LOW"]["condition_config"]["value"] == 60
-    assert water_level["WATER_LEVEL_LOW"]["message"] == "Mực nước thấp hơn 60%."
+    assert water_level["WATER_LEVEL_LOW"]["message"] == "Mức nước bể lọc vi sinh thấp hơn 60%."
+    assert fish_tank_water_level["WATER_LEVEL_LOW"]["condition_config"]["operator"] == "LT"
+    assert fish_tank_water_level["WATER_LEVEL_LOW"]["condition_config"]["value"] == 60
+    assert fish_tank_water_level["WATER_LEVEL_LOW"]["message"] == "Mức nước bể cá thấp hơn 60%."
 
 
 @pytest.mark.asyncio
@@ -84,7 +91,7 @@ async def test_seed_is_idempotent_for_v1_catalogs_and_rbac() -> None:
             )
         )
         assert template is not None
-        assert "12 loại cảm biến" in (template.description or "")
+        assert "13 loại cảm biến" in (template.description or "")
         assert "số instance thực tế" in (template.description or "")
 
         role_codes = set((await db.scalars(select(Role.code))).all())

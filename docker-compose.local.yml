@@ -1,0 +1,58 @@
+name: aquaponics-platform
+
+x-backend-service: &backend-service
+  image: aquaponics-platform-backend
+  build:
+    context: ./backend
+  restart: unless-stopped
+  env_file:
+    - ./backend/.env
+  extra_hosts:
+    - "host.docker.internal:host-gateway"
+
+services:
+  backend:
+    <<: *backend-service
+    ports:
+      - "8000:8000"
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
+  scheduler:
+    <<: *backend-service
+    command: python -m app.jobs.runner
+
+  mqtt_consumer:
+    <<: *backend-service
+    command: python -m app.mqtt.consumer
+
+  frontend:
+    image: aquaponics-platform-frontend
+    build:
+      context: ./frontend
+      args:
+        VITE_API_BASE_URL: /api/v1
+    restart: unless-stopped
+    ports:
+      - "3000:80"
+    depends_on:
+      backend:
+        condition: service_healthy
+    healthcheck:
+      test:
+        - CMD
+        - wget
+        - --quiet
+        - --output-document=/dev/null
+        - http://127.0.0.1/
+      interval: 10s
+      timeout: 5s
+      retries: 5

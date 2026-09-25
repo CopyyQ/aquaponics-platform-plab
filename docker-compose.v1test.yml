@@ -1,0 +1,4 @@
+services:
+  backend:
+    environment:
+      DATABASE_URL: postgresql+asyncpg://postgres:postgres@postgres:5432/aquaponics_codex_v1_autogen_20260922

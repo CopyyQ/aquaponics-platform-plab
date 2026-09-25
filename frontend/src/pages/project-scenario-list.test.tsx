@@ -12,7 +12,7 @@ const scenario = (active: boolean): ProjectScenarioSummary => ({
   name: active ? "Kịch bản mặc định" : "Kịch bản mùa nóng",
   description: active ? "Đang vận hành" : "Cho mùa nóng",
   is_active: active,
-  sensor_count: 12,
+  sensor_count: 13,
   actuator_count: 8,
   source_scenario_catalog_id: 1,
   cloned_from_scenario_id: null,
@@ -44,7 +44,7 @@ describe("ProjectScenarioList", () => {
     const markup = renderCard(true)
     expect(markup).toContain("ĐANG SỬ DỤNG")
     expect(markup).toContain("Kịch bản mặc định")
-    expect(markup).toContain("12 cảm biến")
+    expect(markup).toContain("13 cảm biến")
     expect(markup).toContain("8 cơ cấu chấp hành")
     expect(markup).not.toContain(">Sử dụng<")
     expect(markup).not.toContain(">Xóa<")

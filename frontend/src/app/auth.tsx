@@ -6,6 +6,7 @@ import {
   clearStoredAccessToken,
   refreshAccessToken,
 } from "@/shared/api/auth-refresh"
+import { queryClient } from "@/shared/api/query-client"
 
 interface AuthState {
   session: Session | null
@@ -42,13 +43,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       await logoutRequest()
     } finally {
       clearStoredAccessToken()
+      queryClient.clear()
       setSession(null)
     }
   }
 
   useEffect(() => {
     void reload()
-    const expired = () => setSession(null)
+    const expired = () => { queryClient.clear(); setSession(null) }
     window.addEventListener("aquaponics-auth-expired", expired)
     window.addEventListener("aquaponics:authentication-failure", expired)
     return () => {

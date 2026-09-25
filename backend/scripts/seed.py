@@ -15,9 +15,11 @@ from app.models.device_template import (
     DeviceTemplateSensor,
 )
 from app.models.permission import Permission, Role, RolePermission
+from app.models.project_scenario import ProjectScenarioItem
 from app.models.scenario_catalog import ScenarioCatalog, ScenarioCatalogItem
-from app.models.sensor import SensorModel
+from app.models.sensor import Sensor, SensorModel
 from app.models.user import User
+from app.services.scenario_catalog_service import sync_scenario_catalogs_for_template
 
 SENSOR_MODELS: tuple[dict[str, str | float | None], ...] = (
     {"code": "NH3", "name": "Cảm biến NH3", "unit": "mg/L", "description": "Đo nồng độ ammonia trong nước.", "value_type": "NUMBER", "chart_type": "LINE"},
@@ -26,7 +28,8 @@ SENSOR_MODELS: tuple[dict[str, str | float | None], ...] = (
     {"code": "DO", "name": "Cảm biến oxy hòa tan", "unit": "mg/L", "description": "Đo oxy hòa tan trong nước.", "value_type": "NUMBER", "chart_type": "LINE"},
     {"code": "TDS", "name": "Cảm biến TDS", "unit": "ppm", "description": "Đo tổng chất rắn hòa tan trong nước.", "value_type": "NUMBER", "chart_type": "LINE"},
     {"code": "WATER_TEMPERATURE", "name": "Cảm biến nhiệt độ nước", "unit": "°C", "description": "Đo nhiệt độ nước.", "value_type": "NUMBER", "chart_type": "LINE"},
-    {"code": "WATER_LEVEL", "name": "Cảm biến mực nước", "unit": "%", "description": "Theo dõi mức nước trong hệ thống.", "value_type": "NUMBER", "chart_type": "LINE"},
+    {"code": "WATER_LEVEL", "name": "Cảm biến mực nước bể lọc vi sinh", "unit": "%", "description": "Theo dõi mức nước bể lọc vi sinh.", "value_type": "NUMBER", "chart_type": "LINE"},
+    {"code": "WATER_LEVELW2", "name": "Cảm biến mực nước bể cá", "unit": "%", "description": "Theo dõi mức nước bể cá.", "value_type": "NUMBER", "chart_type": "LINE"},
     {"code": "AIR_TEMPERATURE", "name": "Cảm biến nhiệt độ không khí", "unit": "°C", "description": "Đo nhiệt độ không khí tại khu vực lắp đặt.", "value_type": "NUMBER", "chart_type": "LINE"},
     {"code": "AIR_HUMIDITY", "name": "Cảm biến độ ẩm không khí", "unit": "%RH", "description": "Đo độ ẩm tương đối của không khí.", "value_type": "NUMBER", "chart_type": "LINE"},
     {"code": "LIGHT_INTENSITY", "name": "Cảm biến ánh sáng", "unit": "lux", "description": "Đo cường độ ánh sáng tại khu vực lắp đặt.", "value_type": "NUMBER", "chart_type": "LINE"},
@@ -171,20 +174,37 @@ DEFAULT_SENSOR_SCENARIOS: dict[str, dict] = {
         "is_enabled": True,
         "branches": [
             _threshold_branch(
-                "WATER_LEVEL_LOW", "Mực nước thấp", "LT", 60,
-                message="Mực nước thấp hơn 60%.",
+                "WATER_LEVEL_LOW", "Mức nước bể lọc vi sinh thấp", "LT", 60,
+                message="Mức nước bể lọc vi sinh thấp hơn 60%.",
                 consequence=(
-                    "Dòng tuần hoàn và hoạt động của hệ lọc/giàn trồng có thể bị ảnh hưởng."
+                    "Gây hại cho hệ vi sinh trong bể và làm gián đoạn lưu lượng "
+                    "nước vi sinh tuần hoàn lên giàn."
                 ),
                 recommended_action=(
-                    "Kiểm tra bơm, van cấp nước, đường ống và vị trí rò rỉ/tắc nghẽn."
+                    "Kiểm tra bơm bể cá, đường ống từ bể cá lên bể lọc cơ học "
+                    "và đường ống từ bể lọc cơ học sang bể lọc vi sinh."
                 ),
             )
         ],
-        "notes": (
-            "Tài liệu có tình huống cho bể cá và bể lọc vi sinh; catalog hiện có "
-            "một SensorModel WATER_LEVEL và runtime location xác định vị trí thực tế."
-        ),
+        "notes": "Cảm biến riêng cho mức nước bể lọc vi sinh; cảnh báo khi < 60%.",
+    },
+    "WATER_LEVELW2": {
+        "is_enabled": True,
+        "branches": [
+            _threshold_branch(
+                "WATER_LEVEL_LOW", "Mức nước bể cá thấp", "LT", 60,
+                message="Mức nước bể cá thấp hơn 60%.",
+                consequence=(
+                    "Gây hại cho hệ vi sinh trong bể và làm gián đoạn lưu lượng "
+                    "nước vi sinh tuần hoàn lên giàn."
+                ),
+                recommended_action=(
+                    "Kiểm tra bơm bể lọc vi sinh, van nước đầu vào, đường ống từ "
+                    "bể lọc vi sinh lên giàn và đường ống từ giàn xuống bể cá."
+                ),
+            )
+        ],
+        "notes": "Cảm biến riêng cho mức nước bể cá; cảnh báo khi < 60%.",
     },
     "WATER_TEMPERATURE": {
         "is_enabled": True,
@@ -506,7 +526,7 @@ async def seed_device_template(db: AsyncSession) -> int:
             code=CANONICAL_DEVICE_TEMPLATE_CODE,
             name=CANONICAL_DEVICE_TEMPLATE_NAME,
             description=(
-                "Template chuẩn của hệ thống Aquaponics gồm 12 loại cảm biến "
+                "Template chuẩn của hệ thống Aquaponics gồm 13 loại cảm biến "
                 "và 8 loại cơ cấu chấp hành; số instance thực tế trên Device "
                 "có thể nhiều hơn."
             ),
@@ -517,7 +537,7 @@ async def seed_device_template(db: AsyncSession) -> int:
     else:
         template.name = CANONICAL_DEVICE_TEMPLATE_NAME
         template.description = (
-            "Template chuẩn của hệ thống Aquaponics gồm 12 loại cảm biến "
+            "Template chuẩn của hệ thống Aquaponics gồm 13 loại cảm biến "
             "và 8 loại cơ cấu chấp hành; số instance thực tế trên Device "
             "có thể nhiều hơn."
         )
@@ -699,6 +719,95 @@ async def seed_scenario_catalog(db: AsyncSession, device_template_id: int) -> in
     return catalog.id
 
 
+async def backfill_split_water_level_resources(
+    db: AsyncSession, scenario_catalog_id: int
+) -> None:
+    """Keep existing Projects aligned with the two canonical water-level models."""
+
+    model_rows = {
+        row.code: row
+        for row in (
+            await db.scalars(
+                select(SensorModel).where(
+                    SensorModel.code.in_(("WATER_LEVEL", "WATER_LEVELW2"))
+                )
+            )
+        ).all()
+    }
+    biofilter_model = model_rows.get("WATER_LEVEL")
+    fish_tank_model = model_rows.get("WATER_LEVELW2")
+    if biofilter_model is None or fish_tank_model is None:
+        raise RuntimeError("Water-level SensorModel catalog is incomplete")
+
+    sensors = list(
+        (
+            await db.scalars(
+                select(Sensor).where(
+                    Sensor.code.in_(("WATER_LEVEL", "WATER_LEVELW2")),
+                    Sensor.is_deleted.is_(False),
+                )
+            )
+        ).all()
+    )
+    canonical_names = {
+        "WATER_LEVEL": "Cảm biến mực nước bể lọc vi sinh",
+        "WATER_LEVELW2": "Cảm biến mực nước bể cá",
+    }
+    canonical_model_ids = {
+        "WATER_LEVEL": biofilter_model.id,
+        "WATER_LEVELW2": fish_tank_model.id,
+    }
+    known_water_level_names = {
+        "Cảm biến mực nước",
+        "Cảm biến mực nước bể lọc vi sinh",
+        "Cảm biến mực nước bể cá",
+    }
+
+    for sensor in sensors:
+        target_model_id = canonical_model_ids[str(sensor.code)]
+        sensor.sensor_model_id = target_model_id
+        if sensor.name in known_water_level_names:
+            sensor.name = canonical_names[str(sensor.code)]
+
+    await db.flush()
+
+    catalog_items = {
+        item.resource_code: item
+        for item in (
+            await db.scalars(
+                select(ScenarioCatalogItem).where(
+                    ScenarioCatalogItem.scenario_catalog_id == scenario_catalog_id,
+                    ScenarioCatalogItem.target_type == "SENSOR",
+                    ScenarioCatalogItem.resource_code.in_(
+                        ("WATER_LEVEL", "WATER_LEVELW2")
+                    ),
+                )
+            )
+        ).all()
+    }
+    sensors_by_id = {sensor.id: sensor for sensor in sensors}
+    if sensors_by_id:
+        runtime_items = list(
+            (
+                await db.scalars(
+                    select(ProjectScenarioItem).where(
+                        ProjectScenarioItem.sensor_id.in_(tuple(sensors_by_id))
+                    )
+                )
+            ).all()
+        )
+        for item in runtime_items:
+            sensor = sensors_by_id.get(item.sensor_id)
+            if sensor is None:
+                continue
+            item.name = sensor.name
+            source_item = catalog_items.get(str(sensor.code))
+            if source_item is not None:
+                item.source_scenario_catalog_item_id = source_item.id
+
+    await db.flush()
+
+
 async def seed() -> None:
     async with AsyncSessionLocal() as db:
         await seed_rbac(db)
@@ -751,7 +860,9 @@ async def seed() -> None:
         await db.flush()
         device_template_id = await seed_device_template(db)
         await db.flush()
-        await seed_scenario_catalog(db, device_template_id)
+        scenario_catalog_id = await seed_scenario_catalog(db, device_template_id)
+        await sync_scenario_catalogs_for_template(db, device_template_id)
+        await backfill_split_water_level_resources(db, scenario_catalog_id)
         roles = {role.code: role.id for role in (await db.scalars(select(Role))).all()}
         if roles:
             admin.role_id = roles.get(UserRole.ADMIN.value)

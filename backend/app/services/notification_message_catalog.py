@@ -52,7 +52,7 @@ def sensor_condition_key(model_code: str, direction: str) -> str:
         return "SENSOR_WATER_TEMPERATURE_HIGH"
     if code == "TDS" and direction == "BELOW":
         return "SENSOR_TDS_LOW"
-    if code == "WATER_LEVEL" and direction == "BELOW":
+    if code in {"WATER_LEVEL", "WATER_LEVELW2"} and direction == "BELOW":
         return "SENSOR_WATER_LEVEL_LOW"
     return "SENSOR_THRESHOLD_LOW" if direction == "BELOW" else "SENSOR_THRESHOLD_HIGH"
 

@@ -1,11 +1,15 @@
 import { AlertTriangle, CheckCircle2 } from "lucide-react"
 import { Link } from "react-router-dom"
+import type { ScadaRuntimeResponse } from "@/api/contracts"
+import { deriveScadaScenarioSignals, resolveScadaScenarioImage } from "@/entities/scada/model/scenario-image"
 import type { OwnerAlertCard, OwnerOverviewModel } from "./owner-overview.model"
 import { formatRelative } from "@/shared/lib/date"
 import { cn } from "@/shared/lib/utils"
 import { Card } from "@/shared/ui/card"
 import { EmptyState } from "@/shared/ui/empty-state"
 import { Skeleton } from "@/shared/ui/skeleton"
+
+type ScenarioRuntime = Pick<ScadaRuntimeResponse, "aquaponics_system" | "inventory" | "runtime" | "updated_at">
 
 const CARD = "rounded-2xl border-0 p-5 shadow-[0_8px_30px_-18px_rgba(15,63,53,0.35)]"
 
@@ -31,17 +35,19 @@ function AlertRow({ alert }: { alert: OwnerAlertCard }) {
   )
 }
 
-export function OwnerOverviewBoard({ model, systemId }: { model: OwnerOverviewModel; systemId: string }) {
+export function OwnerOverviewBoard({ model, systemId, scadaRuntime, localHour }: { model: OwnerOverviewModel; systemId: string; scadaRuntime?: ScenarioRuntime; localHour?: number }) {
+  const selection = scadaRuntime
+    ? resolveScadaScenarioImage(deriveScadaScenarioSignals(scadaRuntime, localHour ?? new Date(scadaRuntime.updated_at).getHours()))
+    : null
+
   return (
     <div className="grid gap-5 lg:h-[calc(100vh-7.5rem)] lg:min-h-[480px] lg:grid-cols-[2fr_1fr]">
-      {/* Cột trái (~67%): khu vực dành sẵn cho biểu đồ */}
-      <Card className={cn(CARD, "flex min-h-[420px] flex-col")}>
-        <div className="mb-3 flex shrink-0 items-center justify-between gap-3">
-          <h2 className="text-base font-semibold text-slate-900">Biểu đồ</h2>
-        </div>
-        <div className="grid flex-1 place-items-center rounded-xl border-2 border-dashed border-slate-200 bg-slate-50 text-sm text-slate-400">
-          Khu vực biểu đồ
-        </div>
+      <Card className={cn(CARD, "min-h-[420px] overflow-hidden p-0")}>
+        {selection?.assetUrl && selection.filename ? <img
+          src={selection.assetUrl}
+          alt={`Sơ đồ Aquaponics: ${selection.filename}`}
+          className="h-full min-h-[420px] w-full object-contain"
+        /> : null}
       </Card>
 
       {/* Cột phải (~33%): cảnh báo, chiều cao cố định, danh sách scroll bên trong */}

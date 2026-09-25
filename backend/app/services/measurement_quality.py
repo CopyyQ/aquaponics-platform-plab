@@ -10,6 +10,7 @@ ENGINEERING_RANGES: dict[str, tuple[float, float]] = {
     "DO": (0.0, 30.0),
     "TDS": (0.0, 100000.0),
     "WATER_LEVEL": (0.0, 100.0),
+    "WATER_LEVELW2": (0.0, 100.0),
     "AIR_HUMIDITY": (0.0, 100.0),
     "LIGHT_INTENSITY": (0.0, 200000.0),
     "VOLTAGE": (0.0, 1000.0),

@@ -37,6 +37,7 @@ EXPECTED_SENSOR_CODES = (
     "TDS",
     "WATER_TEMPERATURE",
     "WATER_LEVEL",
+    "WATER_LEVELW2",
     "AIR_TEMPERATURE",
     "AIR_HUMIDITY",
     "LIGHT_INTENSITY",
@@ -59,7 +60,7 @@ EXPECTED_ACTUATOR_CODES = (
 def test_sensor_catalog_is_exactly_the_approved_aquaponics_set() -> None:
     codes = tuple(item["code"] for item in SENSOR_MODELS)
     assert codes == EXPECTED_SENSOR_CODES
-    assert len(codes) == len(set(codes)) == 12
+    assert len(codes) == len(set(codes)) == 13
 
 
 def test_actuator_catalog_is_exactly_the_approved_aquaponics_set() -> None:
@@ -91,7 +92,7 @@ async def test_seed_persists_exact_canonical_hardware_catalog() -> None:
         )
 
         assert set(sensor_codes) == set(EXPECTED_SENSOR_CODES)
-        assert len(sensor_codes) == 12
+        assert len(sensor_codes) == 13
         assert set(actuator_codes) == set(EXPECTED_ACTUATOR_CODES)
         assert len(actuator_codes) == 8
         assert len(templates) == 1

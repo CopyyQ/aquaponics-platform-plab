@@ -41,3 +41,4 @@ def test_health_notification_only_fires_on_health_transition() -> None:
     assert should_notify_health(previous_status="WARNING", previous_fingerprint="changed", current_status="CRITICAL", current_fingerprint="critical") == (True, False)
     assert should_notify_health(previous_status="CRITICAL", previous_fingerprint="critical", current_status="HEALTHY", current_fingerprint="healthy") == (True, True)
     assert should_notify_health(previous_status="HEALTHY", previous_fingerprint="healthy", current_status="HEALTHY", current_fingerprint="new-timestamp-only") == (False, False)
+

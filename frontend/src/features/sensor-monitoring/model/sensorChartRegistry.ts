@@ -12,6 +12,7 @@ export const sensorChartRegistry: Record<string, SensorChart> = {
   DISSOLVED_OXYGEN: DissolvedOxygenChart,
   EC: ElectricalConductivityChart,
   WATER_LEVEL: WaterLevelChart,
+  WATER_LEVELW2: WaterLevelChart,
   FLOW: WaterFlowChart,
   WATER_FLOW: WaterFlowChart,
   TURBIDITY: TurbidityChart,

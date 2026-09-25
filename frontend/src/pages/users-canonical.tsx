@@ -1,10 +1,11 @@
 import { useMemo, useState } from "react"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { Plus, Search, Users } from "lucide-react"
-import { Link } from "react-router-dom"
+import { Eye, Search, UserRoundPlus, Users } from "lucide-react"
 import { createManagedUser, listRoles, listUsers, queryKeys } from "@/api/resources"
+import type { UserStatus } from "@/api/contracts"
 import { errorMessage } from "@/api/client"
 import { useAuth } from "@/app/auth"
+import { UserDetailView } from "@/pages/user-detail-canonical"
 import { Button } from "@/shared/ui/button"
 import { Card, CardContent } from "@/shared/ui/card"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/shared/ui/dialog"
@@ -18,18 +19,27 @@ import { Switch } from "@/shared/ui/switch"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/shared/ui/table"
 import { toast } from "sonner"
 
+// Hieu ung chi ap dung cho cac hop thoai o man hinh nay.
+const userDialogMotion = "duration-200 ease-out data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:zoom-in-95 data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:zoom-out-95 motion-reduce:animate-none"
+const userOverlayMotion = "duration-200 data-[state=open]:fade-in-0 data-[state=closed]:fade-out-0 motion-reduce:animate-none"
+
+type UserStatusFilter = "ALL" | UserStatus
+
 export function UsersPage() {
   const { can } = useAuth()
   const client = useQueryClient()
   const [search, setSearch] = useState("")
   const [creating, setCreating] = useState(false)
+  const [viewing, setViewing] = useState<string | null>(null)
+  const [status, setStatus] = useState<UserStatusFilter>("ALL")
   const users = useQuery({ queryKey: queryKeys.users, queryFn: listUsers })
   const roles = useQuery({ queryKey: queryKeys.roles, queryFn: listRoles, enabled: can("users.create") })
-  const filtered = useMemo(() => (users.data ?? []).filter((user) => `${user.full_name} ${user.username} ${user.email} ${user.role_name ?? user.role_code ?? ""}`.toLocaleLowerCase("vi").includes(search.toLocaleLowerCase("vi"))), [search, users.data])
+  const filtered = useMemo(() => (users.data ?? []).filter((user) => (status === "ALL" || user.status === status) && `${user.full_name} ${user.username} ${user.email} ${user.role_name ?? user.role_code ?? ""}`.toLocaleLowerCase("vi").includes(search.toLocaleLowerCase("vi"))), [search, status, users.data])
   return <section className="space-y-5">
-    <div className="flex flex-wrap items-start justify-between gap-3"><div><h1 className="text-3xl font-bold">Người dùng và RBAC</h1><p className="text-sm text-muted-foreground">Quản lý tài khoản bằng canonical Users API và quyền do session phát hành.</p></div>{can("users.create") ? <Button onClick={() => setCreating(true)}><Plus />Tạo tài khoản</Button> : null}</div>
-    <label className="relative block max-w-xl"><span className="sr-only">Tìm người dùng</span><Search className="absolute left-3 top-2.5 size-4 text-muted-foreground" /><Input className="pl-9" placeholder="Tìm theo tên, username, email hoặc vai trò" value={search} onChange={(event) => setSearch(event.target.value)} /></label>
-    {users.isLoading ? <Skeleton className="h-80" /> : users.isError ? <EmptyState icon={Users} title="Không thể tải người dùng" description={errorMessage(users.error)} /> : filtered.length ? <Card><CardContent className="overflow-x-auto p-0"><Table><TableHeader><TableRow><TableHead>Họ tên</TableHead><TableHead>Tên đăng nhập</TableHead><TableHead>Email</TableHead><TableHead>Vai trò</TableHead><TableHead>Trạng thái</TableHead></TableRow></TableHeader><TableBody>{filtered.map((user) => <TableRow key={user.id}><TableCell><Link className="font-medium text-primary hover:underline" to={`/users/${user.id}`}>{user.full_name}</Link></TableCell><TableCell>{user.username}</TableCell><TableCell>{user.email}</TableCell><TableCell>{user.role_name ?? user.role_code ?? "Chưa gán"}</TableCell><TableCell><StatusBadge value={user.status} /></TableCell></TableRow>)}</TableBody></Table></CardContent></Card> : <EmptyState icon={Users} title={users.data?.length ? "Không tìm thấy người dùng" : "Chưa có người dùng"} description={users.data?.length ? "Thử một từ khoá khác." : "API không trả về tài khoản nào."} />}
+    <div><h1 className="text-3xl font-bold">Quản lý người dùng</h1><p className="text-sm text-muted-foreground">Quản lý tài khoản người dùng trong hệ thống</p></div>
+    <div className="flex flex-wrap items-center justify-between gap-3"><label className="relative block w-full sm:w-[22rem]"><span className="sr-only">Tìm người dùng</span><Search className="absolute left-3 top-2.5 size-4 text-muted-foreground" /><Input className="pl-9" placeholder="Tìm theo tên, username, email hoặc vai trò" value={search} onChange={(event) => setSearch(event.target.value)} /></label><div className="flex flex-wrap items-center gap-2"><Select value={status} onValueChange={(value) => setStatus(value as UserStatusFilter)}><SelectTrigger aria-label="Lọc theo trạng thái" className="w-auto shrink-0 gap-2"><SelectValue /></SelectTrigger><SelectContent position="popper" sideOffset={6} className="w-auto min-w-[var(--radix-select-trigger-width)] whitespace-nowrap"><SelectItem value="ALL">Tất cả trạng thái</SelectItem><SelectItem value="ACTIVE">Đang hoạt động</SelectItem><SelectItem value="DISABLED">Đã vô hiệu hóa</SelectItem><SelectItem value="LOCKED">Đã khóa</SelectItem><SelectItem value="SOFT_DELETED">Đã xóa mềm</SelectItem></SelectContent></Select>{can("users.create") ? <Button onClick={() => setCreating(true)}><UserRoundPlus />Tạo tài khoản</Button> : null}</div></div>
+    {users.isLoading ? <Skeleton className="h-80" /> : users.isError ? <EmptyState icon={Users} title="Không thể tải người dùng" description={errorMessage(users.error)} /> : filtered.length ? <Card><CardContent className="overflow-x-auto p-0"><Table><TableHeader><TableRow><TableHead>Họ tên</TableHead><TableHead>Tên đăng nhập</TableHead><TableHead>Email</TableHead><TableHead>Vai trò</TableHead><TableHead>Trạng thái</TableHead><TableHead className="text-center">Hành động</TableHead></TableRow></TableHeader><TableBody>{filtered.map((user) => <TableRow key={user.id}><TableCell className="font-medium">{user.full_name}</TableCell><TableCell>{user.username}</TableCell><TableCell>{user.email}</TableCell><TableCell>{user.role_name ?? user.role_code ?? "Chưa gán"}</TableCell><TableCell><StatusBadge value={user.status} /></TableCell><TableCell><div className="flex justify-center"><Button size="icon-sm" variant="outline" aria-label={`Xem chi tiết ${user.full_name}`} title={`Xem chi tiết ${user.full_name}`} onClick={() => setViewing(user.id)}><Eye /></Button></div></TableCell></TableRow>)}</TableBody></Table></CardContent></Card> : <EmptyState icon={Users} title={users.data?.length ? "Không tìm thấy người dùng" : "Chưa có người dùng"} description={users.data?.length ? "Thử một từ khoá khác hoặc đổi bộ lọc trạng thái." : "API không trả về tài khoản nào."} />}
+    <Dialog open={viewing !== null} onOpenChange={(open) => { if (!open) setViewing(null) }}><DialogContent className={`max-h-[90vh] max-w-5xl overflow-y-auto ${userDialogMotion}`} overlayClassName={userOverlayMotion}><DialogTitle className="sr-only">Chi tiết người dùng</DialogTitle>{viewing !== null ? <UserDetailView userId={viewing} embedded /> : null}</DialogContent></Dialog>
     <CreateUserDialog open={creating} onOpenChange={setCreating} roles={roles.data ?? []} onCreated={async () => { await client.invalidateQueries({ queryKey: queryKeys.users }) }} />
   </section>
 }
@@ -50,7 +60,7 @@ function CreateUserDialog({ open, onOpenChange, roles, onCreated }: { open: bool
     onError: (error) => toast.error(errorMessage(error)),
   })
   const valid = username.trim() && fullName.trim() && email.trim() && phone.trim() && password.length >= 8 && password === confirm
-  return <Dialog open={open} onOpenChange={onOpenChange}><DialogContent className="sm:max-w-2xl"><DialogHeader><DialogTitle>Tạo tài khoản</DialogTitle><DialogDescription>Tạo người dùng mới và gán vai trò canonical.</DialogDescription></DialogHeader><div className="grid gap-4 sm:grid-cols-2">
+  return <Dialog open={open} onOpenChange={onOpenChange}><DialogContent className={`sm:max-w-2xl ${userDialogMotion}`} overlayClassName={userOverlayMotion}><DialogHeader><DialogTitle>Tạo tài khoản</DialogTitle><DialogDescription>Tạo người dùng mới và gán vai trò.</DialogDescription></DialogHeader><div className="grid gap-4 sm:grid-cols-2">
     <Field id="new-username" label="Tên đăng nhập" value={username} onChange={setUsername} />
     <Field id="new-fullname" label="Họ tên" value={fullName} onChange={setFullName} />
     <Field id="new-email" label="Email" type="email" value={email} onChange={setEmail} />

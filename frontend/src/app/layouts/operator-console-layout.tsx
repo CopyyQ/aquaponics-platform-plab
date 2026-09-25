@@ -1,7 +1,7 @@
 import { useState } from "react"
 import { useQuery } from "@tanstack/react-query"
 import { Bell, Droplets, LayoutDashboard, LogOut, Menu, Settings, UserRound, Wrench, X } from "lucide-react"
-import { Link, NavLink, Outlet, useLocation, useNavigate, useParams } from "react-router-dom"
+import { Link, Navigate, NavLink, Outlet, useLocation, useNavigate, useParams } from "react-router-dom"
 import { getMonitoringLatest, getSystem, listAlerts, listSystems, queryKeys } from "@/api/resources"
 import { errorMessage } from "@/api/client"
 import { useAuth } from "@/app/auth"
@@ -164,10 +164,11 @@ export function OperatorConsoleLayout() {
 
 export function OperatorSystemFrame() {
   const systemId = useParams().systemId ?? ""
-  const system = useQuery({ queryKey: queryKeys.system(systemId), queryFn: () => getSystem(systemId), enabled: Boolean(systemId) })
+  const system = useQuery({ queryKey: queryKeys.system(systemId), queryFn: () => getSystem(systemId), enabled: Boolean(systemId), refetchInterval: 15_000 })
   if (system.isLoading) return <Skeleton className="h-72" />
   if (system.isError || !system.data) {
     return <div className="rounded-2xl border border-red-200 bg-red-50 p-6 text-red-700">{errorMessage(system.error) || "Không thể tải hệ thống Aquaponics."}</div>
   }
+  if (system.data.status !== "ACTIVE") return <Navigate to="/aquaponics-systems" replace />
   return <Outlet context={{ system: system.data }} />
 }
