@@ -39,7 +39,8 @@ describe("SCADA scenario image mapping", () => {
     expect(signals.waterLevel).toMatchObject({ value: 100, status: "AVAILABLE", sourceCode: "WATER_LEVELW2" })
     expect(signals.feederOpen).toMatchObject({ value: null, status: "NONE" })
     expect(signals.raining).toMatchObject({ value: null, status: "NONE" })
-    expect(image.filename).toBe("Máy cho cá ăn đóng nắp; Bể cá 100%; Buổi sáng.jpg")
+    expect(image.slug).toBe("feeder-closed_tank-100_morning.jpg")
+    expect(image.label).toBe("Máy cho cá ăn đóng nắp; Bể cá 100%; Buổi sáng")
     expect(image.fallbackDimensions).toEqual(["FEEDER", "WEATHER"])
   })
 
@@ -74,7 +75,7 @@ describe("SCADA scenario image mapping", () => {
       status: "AVAILABLE",
       sourceCode: "WATER_LEVELW2",
     })
-    expect(image.filename).toBe("Máy cho cá ăn đóng nắp; Bể cá 60%; Buổi sáng.jpg")
+    expect(image.slug).toBe("feeder-closed_tank-60_morning.jpg")
   })
 
   it("does not use stale or invalid telemetry as a visual state", () => {
@@ -83,22 +84,39 @@ describe("SCADA scenario image mapping", () => {
 
     expect(stale.waterLevel).toMatchObject({ value: null, status: "STALE" })
     expect(invalid.waterLevel).toMatchObject({ value: null, status: "INVALID" })
-    expect(resolveScadaScenarioImage(stale).filename).toBeNull()
-    expect(resolveScadaScenarioImage(invalid).filename).toBeNull()
+    expect(resolveScadaScenarioImage(stale).slug).toBeNull()
+    expect(resolveScadaScenarioImage(invalid).slug).toBeNull()
   })
 
   it("does not treat telemetry from an offline Device as current", () => {
     const signals = deriveScadaScenarioSignals(source({ water: { value: 100 }, deviceConnectivity: "OFFLINE" }), 9)
     expect(signals.waterLevel).toMatchObject({ value: null, status: "OFFLINE" })
-    expect(resolveScadaScenarioImage(signals).filename).toBeNull()
+    expect(resolveScadaScenarioImage(signals).slug).toBeNull()
   })
   it("uses reported GROW_LIGHT state at night and keeps missing feeder/weather explicitly NONE", () => {
     const signals = deriveScadaScenarioSignals(source({ water: { value: 60 }, growLight: true }), 21)
     const image = resolveScadaScenarioImage(signals)
 
     expect(signals.growLightOn).toMatchObject({ value: true, status: "AVAILABLE", sourceCode: "GROW_LIGHT" })
-    expect(image.filename).toBe("Máy cho cá ăn đóng nắp; Bể cá 60%; Buổi tối có đèn.jpg")
-    expect(image.assetUrl).toContain(encodeURIComponent(image.filename ?? ""))
+    expect(image.slug).toBe("feeder-closed_tank-60_night-light.jpg")
+    expect(image.label).toBe("Máy cho cá ăn đóng nắp; Bể cá 60%; Buổi tối có đèn")
+    expect(image.assetUrl).toBe("/scada/scenarios/feeder-closed_tank-60_night-light.jpg")
     expect(image.fallbackDimensions).toEqual(["FEEDER", "WEATHER"])
+  })
+
+  it("keeps every asset slug URL-safe so static hosting needs no percent-encoding", () => {
+    for (const water of [60, 100]) {
+      for (const hour of [9, 21]) {
+        for (const growLight of [true, false]) {
+          const image = resolveScadaScenarioImage(
+            deriveScadaScenarioSignals(source({ water: { value: water }, growLight }), hour),
+          )
+
+          expect(image.slug).toMatch(/^[a-z0-9_.-]+\.jpg$/)
+          expect(image.assetUrl).toBe(`/scada/scenarios/${image.slug}`)
+          expect(encodeURI(image.assetUrl ?? "")).toBe(image.assetUrl)
+        }
+      }
+    }
   })
 })

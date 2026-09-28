@@ -29,7 +29,8 @@ describe("ScadaScenarioImage", () => {
 
     expect(markup).toContain("Mực nước bể cá")
     expect(markup).toContain("100%")
-    expect(markup).toContain("Máy cho cá ăn đóng nắp; Bể cá 100%; Buổi sáng.jpg")
+    expect(markup).toContain("/scada/scenarios/feeder-closed_tank-100_morning.jpg")
+    expect(markup).toContain("Máy cho cá ăn đóng nắp; Bể cá 100%; Buổi sáng")
     expect(markup).toContain("Chưa có dữ liệu")
   })
   it("does not render a scenario image when WATER_LEVELW2 is stale", () => {

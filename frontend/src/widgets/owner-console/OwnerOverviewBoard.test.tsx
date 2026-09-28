@@ -2,16 +2,9 @@ import { renderToStaticMarkup } from "react-dom/server"
 import { MemoryRouter } from "react-router-dom"
 import { describe, expect, it } from "vitest"
 import type { ScadaRuntimeResponse } from "@/api/contracts"
-import type { OwnerOverviewModel } from "./owner-overview.model"
 import { OwnerOverviewBoard } from "./OwnerOverviewBoard"
 
-type ScenarioRuntime = Pick<ScadaRuntimeResponse, "aquaponics_system" | "inventory" | "runtime" | "updated_at">
-
-const model: OwnerOverviewModel = {
-  system: {} as OwnerOverviewModel["system"],
-  openAlertCount: 0,
-  alerts: [],
-}
+type ScenarioRuntime = Pick<ScadaRuntimeResponse, "aquaponics_system" | "inventory" | "runtime" | "issues" | "updated_at">
 
 function scadaRuntime(): ScenarioRuntime {
   return {
@@ -35,6 +28,7 @@ function scadaRuntime(): ScenarioRuntime {
       actuators: [],
       alerts: [],
     },
+    issues: [],
     updated_at: "2026-09-25T04:40:01Z",
   }
 }
@@ -43,15 +37,19 @@ describe("OwnerOverviewBoard SCADA image", () => {
   it("replaces the chart placeholder with only the selected runtime image", () => {
     const markup = renderToStaticMarkup(
       <MemoryRouter>
-        <OwnerOverviewBoard model={model} systemId="project-1" scadaRuntime={scadaRuntime()} localHour={12} />
+        <OwnerOverviewBoard scadaRuntime={scadaRuntime()} localHour={12} />
       </MemoryRouter>,
     )
 
     expect(markup).toContain("<img")
     expect(markup).toContain("Bể cá 100%")
+    // Cảnh báo đã chuyển lên header nên không còn nằm trong board
+    expect(markup).not.toContain("Cảnh báo")
+    expect(markup).not.toContain("Xem tất cả")
     expect(markup).not.toContain("Khu vực biểu đồ")
     expect(markup).not.toContain("Ánh xạ dữ liệu runtime")
-    expect(markup).not.toContain("Mực nước bể cá")
+    // Board chỉ bọc lớp phủ SCADA, không tự dựng bảng chỉ số riêng
+    expect(markup).toContain("scada-overlay")
     expect(markup).not.toContain("Xem sơ đồ chi tiết")
   })
 })
