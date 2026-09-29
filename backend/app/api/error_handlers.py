@@ -11,7 +11,6 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from app.core.exceptions import ApplicationError
 from app.schemas.error import ApiErrorResponse, ApiValidationIssue
 
-
 logger = logging.getLogger(__name__)
 
 DEFAULT_ERROR_CODES = {
@@ -21,6 +20,7 @@ DEFAULT_ERROR_CODES = {
     404: "RESOURCE_NOT_FOUND",
     409: "CONFLICT",
     422: "VALIDATION_ERROR",
+    429: "TOO_MANY_REQUESTS",
     500: "INTERNAL_SERVER_ERROR",
     503: "SERVICE_UNAVAILABLE",
 }

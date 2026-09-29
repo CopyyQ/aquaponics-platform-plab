@@ -155,7 +155,7 @@ def test_mutations_document_conflict_and_create_system_documents_503() -> None:
 def test_all_documented_api_errors_reference_canonical_schema() -> None:
     document = _openapi()
     methods = {"get", "post", "put", "patch", "delete"}
-    error_statuses = {"400", "401", "403", "404", "409", "422", "500", "503"}
+    error_statuses = {"400", "401", "403", "404", "409", "422", "429", "500", "503"}
     violations: list[str] = []
 
     for path, path_item in document["paths"].items():

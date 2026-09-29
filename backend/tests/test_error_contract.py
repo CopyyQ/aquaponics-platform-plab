@@ -284,7 +284,7 @@ def test_http_exception_preserves_protocol_headers() -> None:
     assert response.status_code == 429
     assert response.headers["retry-after"] == "60"
     assert response.json() == {
-        "code": "HTTP_ERROR",
+        "code": "TOO_MANY_REQUESTS",
         "detail": "Thử lại sau.",
     }
 
