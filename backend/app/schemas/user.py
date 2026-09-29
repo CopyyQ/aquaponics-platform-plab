@@ -1,11 +1,38 @@
+import re
+from collections.abc import Mapping
 from datetime import datetime
 from uuid import UUID
-
-import re
 
 from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator, model_validator
 
 from app.core.enums import UserRole, UserStatus
+
+USERNAME_PATTERN = re.compile(r"^[A-Za-z0-9._-]+$")
+PHONE_PATTERN = re.compile(r"^\+?[0-9]{8,15}$")
+REQUIRED_USER_PROFILE_FIELDS = ("full_name", "email", "phone_number", "address")
+
+
+def normalize_required_user_text(value: object) -> object:
+    if value is None:
+        raise ValueError("Thông tin này là bắt buộc")
+    if isinstance(value, str):
+        value = value.strip()
+        if not value:
+            raise ValueError("Thông tin này không được để trống")
+    return value
+
+
+def normalize_required_user_email(value: object) -> object:
+    value = normalize_required_user_text(value)
+    return value.lower() if isinstance(value, str) else value
+
+
+def missing_required_user_profile_fields(values: Mapping[str, object]) -> list[str]:
+    return [
+        field
+        for field in REQUIRED_USER_PROFILE_FIELDS
+        if not isinstance(values.get(field), str) or not str(values[field]).strip()
+    ]
 
 
 class UserBase(BaseModel):
@@ -17,12 +44,26 @@ class UserBase(BaseModel):
 
 
 class UserCreate(UserBase):
+    address: str = Field(min_length=1, max_length=2000)
     temporary_password: str = Field(min_length=8, max_length=128)
     role_id: int | None = None
 
+    @field_validator("username", "full_name", "phone_number", "address", mode="before")
+    @classmethod
+    def trim_required_text(cls, value: object) -> object:
+        return normalize_required_user_text(value)
 
-USERNAME_PATTERN = re.compile(r"^[A-Za-z0-9._-]+$")
-PHONE_PATTERN = re.compile(r"^\+?[0-9]{8,15}$")
+    @field_validator("email", mode="before")
+    @classmethod
+    def normalize_email(cls, value: object) -> object:
+        return normalize_required_user_email(value)
+
+    @field_validator("phone_number")
+    @classmethod
+    def validate_phone_number(cls, value: str) -> str:
+        if not PHONE_PATTERN.fullmatch(value):
+            raise ValueError("Số điện thoại chỉ gồm 8–15 chữ số và có thể bắt đầu bằng dấu +")
+        return value
 
 
 class AdminUserCreate(BaseModel):
@@ -30,7 +71,7 @@ class AdminUserCreate(BaseModel):
     full_name: str = Field(min_length=2, max_length=255)
     email: EmailStr
     phone_number: str = Field(min_length=8, max_length=30)
-    address: str = Field(default="", max_length=2000)
+    address: str = Field(min_length=1, max_length=2000)
     system_role: UserRole
     status: UserStatus = UserStatus.ACTIVE
     password: str = Field(min_length=8, max_length=128)
@@ -40,12 +81,12 @@ class AdminUserCreate(BaseModel):
     @field_validator("username", "full_name", "phone_number", "address", mode="before")
     @classmethod
     def trim_strings(cls, value: object) -> object:
-        return value.strip() if isinstance(value, str) else value
+        return normalize_required_user_text(value)
 
     @field_validator("email", mode="before")
     @classmethod
     def normalize_email(cls, value: object) -> object:
-        return value.strip().lower() if isinstance(value, str) else value
+        return normalize_required_user_email(value)
 
     @field_validator("username")
     @classmethod
@@ -74,9 +115,26 @@ class UserUpdate(BaseModel):
     full_name: str | None = Field(default=None, min_length=2, max_length=255)
     email: EmailStr | None = None
     phone_number: str | None = Field(default=None, min_length=8, max_length=30)
-    address: str | None = None
+    address: str | None = Field(default=None, max_length=2000)
     status: UserStatus | None = None
     system_role: UserRole | None = None
+
+    @field_validator("full_name", "phone_number", "address", mode="before")
+    @classmethod
+    def trim_required_profile_text(cls, value: object) -> object:
+        return normalize_required_user_text(value)
+
+    @field_validator("email", mode="before")
+    @classmethod
+    def normalize_email(cls, value: object) -> object:
+        return normalize_required_user_email(value)
+
+    @field_validator("phone_number")
+    @classmethod
+    def validate_phone_number(cls, value: str | None) -> str | None:
+        if value is not None and not PHONE_PATTERN.fullmatch(value):
+            raise ValueError("Số điện thoại chỉ gồm 8–15 chữ số và có thể bắt đầu bằng dấu +")
+        return value
 
 
 class AccountLifecycleRequest(BaseModel):
@@ -87,7 +145,24 @@ class UserSelfUpdate(BaseModel):
     full_name: str | None = Field(default=None, min_length=2, max_length=255)
     email: EmailStr | None = None
     phone_number: str | None = Field(default=None, min_length=8, max_length=30)
-    address: str | None = None
+    address: str | None = Field(default=None, max_length=2000)
+
+    @field_validator("full_name", "phone_number", "address", mode="before")
+    @classmethod
+    def trim_required_profile_text(cls, value: object) -> object:
+        return normalize_required_user_text(value)
+
+    @field_validator("email", mode="before")
+    @classmethod
+    def normalize_email(cls, value: object) -> object:
+        return normalize_required_user_email(value)
+
+    @field_validator("phone_number")
+    @classmethod
+    def validate_phone_number(cls, value: str | None) -> str | None:
+        if value is not None and not PHONE_PATTERN.fullmatch(value):
+            raise ValueError("Số điện thoại chỉ gồm 8–15 chữ số và có thể bắt đầu bằng dấu +")
+        return value
 
 
 class UserRead(UserBase):

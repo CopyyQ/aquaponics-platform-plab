@@ -1,6 +1,6 @@
 from datetime import UTC, datetime
 
-from fastapi import APIRouter, Depends, Request, Response
+from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -14,7 +14,12 @@ from app.db.session import get_db
 from app.models.user import User
 from app.schemas.auth import ChangePasswordRequest, LoginRequest, TokenResponse
 from app.schemas.common import MessageResponse
-from app.schemas.user import UserRead, UserSelfUpdate
+from app.schemas.user import (
+    REQUIRED_USER_PROFILE_FIELDS,
+    UserRead,
+    UserSelfUpdate,
+    missing_required_user_profile_fields,
+)
 from app.services.audit_service import write_audit
 from app.services.auth_session_service import (
     create_user_session,
@@ -28,7 +33,6 @@ from app.services.login_rate_limit_service import (
     record_login_success,
 )
 from app.services.permission_service import get_effective_permissions
-
 
 router = APIRouter(prefix="/auth", tags=["Authentication"])
 _DUMMY_PASSWORD_HASH = hash_password("invalid-login-dummy-password")
@@ -168,15 +172,22 @@ async def update_me(
     user: User = Depends(get_authenticated_user),
     db: AsyncSession = Depends(get_db),
 ) -> User:
+    values = payload.model_dump(exclude_unset=True)
+    candidate_profile = {field: getattr(user, field) for field in REQUIRED_USER_PROFILE_FIELDS}
+    candidate_profile.update({field: values[field] for field in REQUIRED_USER_PROFILE_FIELDS if field in values})
+    missing_fields = missing_required_user_profile_fields(candidate_profile)
+    if missing_fields:
+        raise HTTPException(
+            422,
+            "Cần nhập đầy đủ thông tin người dùng: " + ", ".join(missing_fields),
+        )
     old_data = {
         "full_name": user.full_name,
         "email": user.email,
         "phone_number": user.phone_number,
         "address": user.address,
     }
-    for key, value in payload.model_dump(
-        exclude_unset=True
-    ).items():
+    for key, value in values.items():
         setattr(user, key, value)
     await write_audit(
         db,

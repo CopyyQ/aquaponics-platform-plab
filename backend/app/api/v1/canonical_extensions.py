@@ -10,7 +10,7 @@ from datetime import UTC, datetime
 from uuid import UUID
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Response
-from pydantic import BaseModel, ConfigDict, EmailStr, Field
+from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -21,10 +21,14 @@ from app.core.config import settings
 from app.core.enums import UserStatus
 from app.core.security import hash_password
 from app.db.session import get_db
+from app.models.operational_alert import (
+    NotificationDelivery,
+    NotificationOutbox,
+    OperationalIncident,
+)
 from app.models.permission import Role
 from app.models.project import Project
 from app.models.project_member import ProjectMember
-from app.models.operational_alert import NotificationDelivery, NotificationOutbox, OperationalIncident
 from app.models.project_settings import (
     ProjectNotificationRecipient,
     ProjectNotificationSettings,
@@ -39,19 +43,27 @@ from app.schemas.notifications import (
     NotificationSettingsUpdate,
     TestMessageResult,
 )
+from app.schemas.user import (
+    PHONE_PATTERN,
+    REQUIRED_USER_PROFILE_FIELDS,
+    missing_required_user_profile_fields,
+    normalize_required_user_email,
+    normalize_required_user_text,
+)
 from app.services.access_service import require_project_access
-from app.services.audit_service import write_audit
-from app.services.auth_session_service import revoke_user_sessions
-from app.services.project_lifecycle_service import activate_project, disable_project
 from app.services.aquaponics_system_creation_service import (
     AquaponicsSystemCreationError,
     create_aquaponics_system,
 )
+from app.services.audit_service import write_audit
+from app.services.auth_session_service import revoke_user_sessions
+from app.services.project_lifecycle_service import activate_project, disable_project
 from app.services.project_role_service import remove_project_role_assignments
-from app.services.telegram_notifier import TelegramNotifier
 from app.services.public_identity_service import (
-    PublicIdentityNotFoundError, get_system_by_public_id,
+    PublicIdentityNotFoundError,
+    get_system_by_public_id,
 )
+from app.services.telegram_notifier import TelegramNotifier
 
 router = APIRouter()
 
@@ -134,11 +146,28 @@ class ManagedUserCreate(BaseModel):
     full_name: str = Field(min_length=2, max_length=255)
     email: EmailStr
     phone_number: str = Field(min_length=8, max_length=30)
-    address: str = Field(default="", max_length=2000)
+    address: str = Field(min_length=1, max_length=2000)
     role_id: int | None = None
     password: str = Field(min_length=8, max_length=128)
     confirm_password: str = Field(min_length=8, max_length=128)
     must_change_password: bool = True
+
+    @field_validator("username", "full_name", "phone_number", "address", mode="before")
+    @classmethod
+    def trim_required_text(cls, value: object) -> object:
+        return normalize_required_user_text(value)
+
+    @field_validator("email", mode="before")
+    @classmethod
+    def normalize_email(cls, value: object) -> object:
+        return normalize_required_user_email(value)
+
+    @field_validator("phone_number")
+    @classmethod
+    def validate_phone_number(cls, value: str) -> str:
+        if not PHONE_PATTERN.fullmatch(value):
+            raise ValueError("Số điện thoại chỉ gồm 8–15 chữ số và có thể bắt đầu bằng dấu +")
+        return value
 
 
 class ManagedUserUpdate(BaseModel):
@@ -146,8 +175,25 @@ class ManagedUserUpdate(BaseModel):
     full_name: str | None = Field(default=None, min_length=2, max_length=255)
     email: EmailStr | None = None
     phone_number: str | None = Field(default=None, min_length=8, max_length=30)
-    address: str | None = None
+    address: str | None = Field(default=None, max_length=2000)
     role_id: int | None = None
+
+    @field_validator("full_name", "phone_number", "address", mode="before")
+    @classmethod
+    def trim_required_profile_text(cls, value: object) -> object:
+        return normalize_required_user_text(value)
+
+    @field_validator("email", mode="before")
+    @classmethod
+    def normalize_email(cls, value: object) -> object:
+        return normalize_required_user_email(value)
+
+    @field_validator("phone_number")
+    @classmethod
+    def validate_phone_number(cls, value: str | None) -> str | None:
+        if value is not None and not PHONE_PATTERN.fullmatch(value):
+            raise ValueError("Số điện thoại chỉ gồm 8–15 chữ số và có thể bắt đầu bằng dấu +")
+        return value
 
 
 class ManagedUserRead(BaseModel):
@@ -377,9 +423,17 @@ async def update_user(
     if payload.role_id is not None and await db.get(Role, payload.role_id) is None:
         raise HTTPException(422, "Role không tồn tại")
     values = payload.model_dump(exclude_unset=True)
+    candidate_profile = {field: getattr(row, field) for field in REQUIRED_USER_PROFILE_FIELDS}
+    candidate_profile.update({field: values[field] for field in REQUIRED_USER_PROFILE_FIELDS if field in values})
+    missing_fields = missing_required_user_profile_fields(candidate_profile)
+    if missing_fields:
+        raise HTTPException(
+            422,
+            "Cần nhập đầy đủ thông tin người dùng: " + ", ".join(missing_fields),
+        )
     old = {k: getattr(row, k) for k in values}
     for key, value in values.items():
-        setattr(row, key, str(value).strip().lower() if key == "email" and value is not None else value)
+        setattr(row, key, value)
     await write_audit(db, user_id=actor.id, action="UPDATE_USER", entity_type="USER", entity_id=row.id, old_data=old, new_data=values)
     await db.commit()
     return _managed_user(await _managed_user_row(db, row.public_id))
