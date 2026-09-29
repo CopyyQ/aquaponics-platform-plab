@@ -322,7 +322,8 @@ function SystemCard({ source, readings }: { source: OverlaySource; readings: Sca
 
       {healthy ? null : (
         <Link
-          to={`/aquaponics-systems/${source.aquaponics_system.id}/alerts`}
+          // status=open: người bấm đang muốn xem việc cần xử lý, không phải lịch sử
+          to={`/aquaponics-systems/${source.aquaponics_system.id}/alerts?status=OPEN`}
           className="mt-[0.5em] self-start rounded-full bg-rose-600 px-[0.85em] py-[0.3em] text-[0.74em] font-bold text-white transition hover:bg-rose-700"
         >
           Kiểm tra ngay →

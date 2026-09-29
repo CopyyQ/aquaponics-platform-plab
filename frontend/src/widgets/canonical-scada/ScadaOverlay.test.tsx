@@ -241,7 +241,8 @@ describe("ScadaOverlay", () => {
     const broken = render(withIssue())
 
     expect(broken).toContain("Kiểm tra ngay")
-    expect(broken).toContain("/aquaponics-systems/sys-1/alerts")
+    // Mở thẳng danh sách chưa xử lý, không bắt người dùng tự lọc
+    expect(broken).toContain("/aquaponics-systems/sys-1/alerts?status=OPEN")
   })
 
   it("keeps every metric readable on small screens through the fallback list", () => {

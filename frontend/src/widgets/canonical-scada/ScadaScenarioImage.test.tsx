@@ -33,11 +33,13 @@ describe("ScadaScenarioImage", () => {
     expect(markup).toContain("Máy cho cá ăn đóng nắp; Bể cá 100%; Buổi sáng")
     expect(markup).toContain("Chưa có dữ liệu")
   })
-  it("does not render a scenario image when WATER_LEVELW2 is stale", () => {
+  it("still renders the diagram when WATER_LEVELW2 is stale, flagging the tank as illustrative", () => {
     const markup = renderToStaticMarkup(<ScadaScenarioImage runtime={runtime(100, "STALE")} localHour={9} />)
 
+    // Số cũ không được trình bày như số đang sống
     expect(markup).toContain("Dữ liệu cũ")
-    expect(markup).toContain("Chưa đủ dữ liệu WATER_LEVELW2")
-    expect(markup).not.toContain("<img")
+    // Nhưng sơ đồ vẫn phải vẽ ra, kèm lời nói rõ phần bể chỉ là minh hoạ
+    expect(markup).toContain("<img")
+    expect(markup).toContain("mực nước bể cá")
   })
 })

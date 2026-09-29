@@ -10,7 +10,7 @@ export type { ScenarioSignal, ScenarioSignalStatus, ScenarioSource }
 export const TANK_FULL_THRESHOLD = 80
 
 export type ScenarioTimeOfDay = "DAY" | "NIGHT"
-export type ScenarioFallbackDimension = "FEEDER" | "WEATHER" | "LIGHT"
+export type ScenarioFallbackDimension = "FEEDER" | "WEATHER" | "LIGHT" | "TANK"
 
 export interface ScadaScenarioSignals {
   waterLevel: ScenarioSignal<number>
@@ -38,12 +38,14 @@ export function deriveScadaScenarioSignals(source: ScenarioSource, localHour: nu
   }
 }
 export function resolveScadaScenarioImage(signals: ScadaScenarioSignals): ScadaScenarioImageSelection {
-  if (signals.waterLevel.value === null || signals.waterLevel.status !== "AVAILABLE") {
-    return { slug: null, label: null, assetUrl: null, tankVisualLevel: null, fallbackDimensions: [] }
-  }
-
-  const tankVisualLevel: 60 | 100 = signals.waterLevel.value >= TANK_FULL_THRESHOLD ? 100 : 60
   const fallbackDimensions: ScenarioFallbackDimension[] = []
+
+  // Mực nước hỏng thì chỉ mất phần phụ thuộc vào mực nước, không kéo sập cả sơ đồ:
+  // vẫn vẽ một bản ảnh và đánh dấu phần bể là minh hoạ, để những chỉ số còn sống
+  // vẫn hiển thị được. Trước đây một cảm biến im lặng là cả màn hình trắng.
+  const level = signals.waterLevel.status === "AVAILABLE" ? signals.waterLevel.value : null
+  if (level === null) fallbackDimensions.push("TANK")
+  const drawnLevel: 60 | 100 = level !== null && level >= TANK_FULL_THRESHOLD ? 100 : 60
   const feederOpen = signals.feederOpen.value ?? false
   if (signals.feederOpen.value === null) fallbackDimensions.push("FEEDER")
 
@@ -61,20 +63,21 @@ export function resolveScadaScenarioImage(signals: ScadaScenarioSignals): ScadaS
     : signals.timeOfDay === "DAY"
       ? "morning"
       : `night-${lightOn ? "light" : "dark"}`
-  const slug = `feeder-${feederOpen ? "open" : "closed"}_tank-${tankVisualLevel}_${sceneSlug}.jpg`
+  const slug = `feeder-${feederOpen ? "open" : "closed"}_tank-${drawnLevel}_${sceneSlug}.jpg`
 
   const scenePart = raining
     ? `trời mưa ${lightOn ? "có đèn" : "không đèn"}`
     : signals.timeOfDay === "DAY"
       ? "Buổi sáng"
       : `Buổi tối ${lightOn ? "có đèn" : "không đèn"}`
-  const label = `Máy cho cá ăn ${feederOpen ? "mở nắp" : "đóng nắp"}; Bể cá ${tankVisualLevel}%; ${scenePart}`
+  const label = `Máy cho cá ăn ${feederOpen ? "mở nắp" : "đóng nắp"}; Bể cá ${drawnLevel}%; ${scenePart}`
 
   return {
     slug,
     label,
     assetUrl: `/scada/scenarios/${slug}`,
-    tankVisualLevel,
+    // null nghĩa là không biết mực nước thật, dù ảnh vẫn phải vẽ ra một mức nào đó
+    tankVisualLevel: level === null ? null : drawnLevel,
     fallbackDimensions,
   }
 }

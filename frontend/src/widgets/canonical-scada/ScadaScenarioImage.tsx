@@ -25,6 +25,7 @@ const fallbackLabels = {
   FEEDER: "máy cho cá ăn",
   WEATHER: "thời tiết",
   LIGHT: "trạng thái đèn",
+  TANK: "mực nước bể cá",
 } as const
 
 export function ScadaScenarioImage({ runtime, localHour }: { runtime: ScenarioRuntime; localHour?: number }) {

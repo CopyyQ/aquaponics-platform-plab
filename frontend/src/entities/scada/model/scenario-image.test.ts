@@ -84,15 +84,30 @@ describe("SCADA scenario image mapping", () => {
 
     expect(stale.waterLevel).toMatchObject({ value: null, status: "STALE" })
     expect(invalid.waterLevel).toMatchObject({ value: null, status: "INVALID" })
-    expect(resolveScadaScenarioImage(stale).slug).toBeNull()
-    expect(resolveScadaScenarioImage(invalid).slug).toBeNull()
+    // Không lấy số cũ làm mực nước thật, nhưng vẫn phải vẽ được sơ đồ
+    expect(resolveScadaScenarioImage(stale).tankVisualLevel).toBeNull()
+    expect(resolveScadaScenarioImage(stale).fallbackDimensions).toContain("TANK")
+    expect(resolveScadaScenarioImage(invalid).tankVisualLevel).toBeNull()
   })
 
   it("does not treat telemetry from an offline Device as current", () => {
     const signals = deriveScadaScenarioSignals(source({ water: { value: 100 }, deviceConnectivity: "OFFLINE" }), 9)
     expect(signals.waterLevel).toMatchObject({ value: null, status: "OFFLINE" })
-    expect(resolveScadaScenarioImage(signals).slug).toBeNull()
+    expect(resolveScadaScenarioImage(signals).tankVisualLevel).toBeNull()
   })
+  it("keeps drawing the diagram when the water level sensor goes quiet", () => {
+    // Một cảm biến im lặng không được làm trắng cả màn hình giám sát:
+    // 12 chỉ số còn lại vẫn phải hiển thị được.
+    const offline = deriveScadaScenarioSignals(source({ water: { value: 100 }, deviceConnectivity: "OFFLINE" }), 9)
+    const image = resolveScadaScenarioImage(offline)
+
+    expect(image.assetUrl).not.toBeNull()
+    expect(image.slug).toMatch(/^feeder-.+\.jpg$/)
+    // Phần bể trong ảnh chỉ là minh hoạ, phải nói rõ ra
+    expect(image.fallbackDimensions).toContain("TANK")
+    expect(image.tankVisualLevel).toBeNull()
+  })
+
   it("uses reported GROW_LIGHT state at night and keeps missing feeder/weather explicitly NONE", () => {
     const signals = deriveScadaScenarioSignals(source({ water: { value: 60 }, growLight: true }), 21)
     const image = resolveScadaScenarioImage(signals)
