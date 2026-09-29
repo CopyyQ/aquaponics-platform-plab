@@ -33,6 +33,7 @@ ACTION_LABELS = {
     "SENSOR_UPDATED": "Cập nhật cảm biến",
     "SENSOR_DISABLED": "Vô hiệu hóa cảm biến",
     "SENSOR_ENABLED": "Kích hoạt cảm biến",
+    "AUTOMATIC_FEEDER_UPDATED": "Cập nhật máy cho ăn tự động",
     "ACTUATOR_COMMAND_REQUESTED": "Yêu cầu lệnh điều khiển",
     "SCADA_LAYOUT_UPDATED": "Lưu sơ đồ vận hành",
     "SCADA_LAYOUT_PUBLISHED": "Xuất bản sơ đồ vận hành",

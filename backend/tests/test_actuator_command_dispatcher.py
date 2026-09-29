@@ -236,3 +236,41 @@ async def test_second_worker_skips_locked_command(monkeypatch) -> None:
             await lock_db.rollback()
     finally:
         await _cleanup(actuator_id)
+
+
+@pytest.mark.asyncio
+async def test_feeder_retry_uses_persisted_command_payload_snapshot(monkeypatch) -> None:
+    now = datetime(2026, 9, 28, 8, 0, tzinfo=UTC)
+    actuator_id, command_ids, device_code, actuator_code = await _seed_commands(now=now)
+    expected = {
+        "feed_level": "LEVEL_3",
+        "free_output_value": None,
+        "free_output_unit": None,
+    }
+    calls: list[tuple[tuple, dict]] = []
+    try:
+        async with AsyncSessionLocal() as db:
+            command = await db.get(ActuatorCommand, command_ids[0])
+            assert command is not None
+            command.command_type = "FEED"
+            command.command_payload = dict(expected)
+            await db.commit()
+
+        monkeypatch.setattr(
+            publisher,
+            "publish_actuator_command",
+            lambda *args, **kwargs: calls.append((args, kwargs)),
+        )
+        async with AsyncSessionLocal() as db:
+            processed = await dispatch_due_actuator_commands(db, now=now)
+
+        assert processed == 1
+        assert len(calls) == 1
+        args, kwargs = calls[0]
+        assert args[:3] == (device_code, command_ids[0], actuator_code)
+        assert kwargs == {
+            "command_type": "FEED",
+            "command_payload": expected,
+        }
+    finally:
+        await _cleanup(actuator_id)

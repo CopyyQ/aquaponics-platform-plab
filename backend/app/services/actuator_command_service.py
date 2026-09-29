@@ -11,11 +11,16 @@ async def create_actuator_command(
     actuator: Actuator,
     desired_state: bool,
     requested_by_user_id: int,
+    command_type: str = "SET_STATE",
+    command_payload: dict | None = None,
+    commit: bool = True,
 ) -> ActuatorCommand:
     requested_at = datetime.now(UTC)
     command = ActuatorCommand(
         actuator_id=actuator.id,
         desired_state=desired_state,
+        command_type=command_type,
+        command_payload=dict(command_payload or {}),
         requested_by_user_id=requested_by_user_id,
         requested_at=requested_at,
         status="PENDING",
@@ -29,6 +34,9 @@ async def create_actuator_command(
     # The HTTP transaction durably records intent only. MQTT delivery is
     # performed by the outbox dispatcher so transient broker outages cannot
     # turn a successfully persisted command into a request-path failure.
-    await db.commit()
-    await db.refresh(command)
+    if commit:
+        await db.commit()
+        await db.refresh(command)
+    else:
+        await db.flush()
     return command

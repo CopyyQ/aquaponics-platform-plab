@@ -1,6 +1,7 @@
 from datetime import datetime
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+
 from app.core.enums import DeviceType
 
 
@@ -117,9 +118,9 @@ class TemplateActuatorInput(BaseModel):
     default_name: str | None = Field(default=None, max_length=255)
     default_location: str | None = Field(default=None, max_length=255)
     default_notes: str | None = None
-    actuator_type: str = Field(default="SWITCH", pattern="^(SWITCH|PUMP|VALVE|LIGHT|ALARM|OTHER)$")
+    actuator_type: str = Field(default="SWITCH", pattern="^(SWITCH|PUMP|VALVE|LIGHT|ALARM|FEEDER|OTHER)$")
     default_state: bool | None = None
-    command_capability: str = Field(default="ON_OFF", pattern="^ON_OFF$")
+    command_capability: str = Field(default="ON_OFF", pattern="^(ON_OFF|FEED_CONTROL)$")
     monitor_current: bool = False
     electrical_profile_id: int | None = None
     is_required: bool = False
@@ -136,9 +137,9 @@ class TemplateActuatorUpdate(BaseModel):
     default_name: str | None = Field(default=None, max_length=255)
     default_location: str | None = Field(default=None, max_length=255)
     default_notes: str | None = None
-    actuator_type: str | None = Field(default=None, pattern="^(SWITCH|PUMP|VALVE|LIGHT|ALARM|OTHER)$")
+    actuator_type: str | None = Field(default=None, pattern="^(SWITCH|PUMP|VALVE|LIGHT|ALARM|FEEDER|OTHER)$")
     default_state: bool | None = None
-    command_capability: str | None = Field(default=None, pattern="^ON_OFF$")
+    command_capability: str | None = Field(default=None, pattern="^(ON_OFF|FEED_CONTROL)$")
     monitor_current: bool | None = None
     electrical_profile_id: int | None = None
     is_required: bool | None = None

@@ -1,6 +1,6 @@
 import asyncio
 
-from sqlalchemy import delete, select
+from sqlalchemy import delete, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -8,17 +8,26 @@ from app.core.config import settings
 from app.core.database import AsyncSessionLocal
 from app.core.enums import UserRole, UserStatus
 from app.core.security import hash_password
+from app.models.actuator import Actuator
 from app.models.actuator_model import ActuatorModel
+from app.models.device import Device
 from app.models.device_template import (
     DeviceTemplate,
     DeviceTemplateActuator,
     DeviceTemplateSensor,
 )
 from app.models.permission import Permission, Role, RolePermission
+from app.models.project import Project
 from app.models.project_scenario import ProjectScenarioItem
 from app.models.scenario_catalog import ScenarioCatalog, ScenarioCatalogItem
 from app.models.sensor import Sensor, SensorModel
 from app.models.user import User
+from app.services.actuator_identity_service import validate_local_actuator_code
+from app.services.automatic_feeder_service import (
+    AUTOMATIC_FEEDER_MODEL_CODE,
+    ensure_automatic_feeder_config,
+)
+from app.services.project_scenario_sync_service import sync_new_actuator_to_scenarios
 from app.services.scenario_catalog_service import sync_scenario_catalogs_for_template
 
 SENSOR_MODELS: tuple[dict[str, str | float | None], ...] = (
@@ -52,6 +61,7 @@ ACTUATOR_MODELS = (
     ("GROW_LIGHT", "Đèn chiếu sáng", "Chiếu sáng bổ sung cho khu vực trồng."),
     ("WARNING_LIGHT", "Đèn cảnh báo", "Cảnh báo trạng thái bất thường tại chỗ."),
     ("WARNING_BUZZER", "Loa/còi báo", "Phát cảnh báo âm thanh tại chỗ."),
+    ("AUTOMATIC_FEEDER", "Máy cho ăn tự động", "Cấp thức ăn cho cá theo mức và lịch cấu hình."),
 )
 
 CANONICAL_ACTUATOR_MODEL_CODES = frozenset(item[0] for item in ACTUATOR_MODELS)
@@ -594,17 +604,109 @@ async def seed_device_template(db: AsyncSession) -> int:
         )
 
     for code, name, _ in ACTUATOR_MODELS:
+        is_feeder = code == AUTOMATIC_FEEDER_MODEL_CODE
         db.add(
             DeviceTemplateActuator(
                 device_template_id=template.id,
                 actuator_model_id=actuator_rows[code].id,
                 code=code,
                 default_name=name,
+                actuator_type="FEEDER" if is_feeder else "SWITCH",
+                command_capability="FEED_CONTROL" if is_feeder else "ON_OFF",
                 is_required=True,
             )
         )
     await db.flush()
     return template.id
+
+
+async def backfill_automatic_feeder_resources(
+    db: AsyncSession,
+    device_template_id: int,
+    *,
+    actor_id: int,
+) -> int:
+    model = await db.scalar(
+        select(ActuatorModel).where(
+            ActuatorModel.code == AUTOMATIC_FEEDER_MODEL_CODE,
+            ActuatorModel.is_deleted.is_(False),
+        )
+    )
+    if model is None:
+        raise RuntimeError("Canonical automatic feeder ActuatorModel is missing")
+    mapping = await db.scalar(
+        select(DeviceTemplateActuator).where(
+            DeviceTemplateActuator.device_template_id == device_template_id,
+            DeviceTemplateActuator.actuator_model_id == model.id,
+        )
+    )
+    if mapping is None:
+        raise RuntimeError("Canonical automatic feeder template mapping is missing")
+
+    devices = list(
+        (
+            await db.scalars(
+                select(Device)
+                .join(Project, Project.id == Device.project_id)
+                .options(selectinload(Device.project))
+                .where(
+                    Device.is_deleted.is_(False),
+                    or_(
+                        Device.device_template_id == device_template_id,
+                        Project.device_template_id == device_template_id,
+                    ),
+                )
+                .order_by(Device.id)
+            )
+        ).unique().all()
+    )
+    created = 0
+    for device in devices:
+        if device.device_template_id is None:
+            device.device_template_id = device_template_id
+        actuator = await db.scalar(
+            select(Actuator).where(
+                Actuator.device_id == device.id,
+                Actuator.actuator_model_id == model.id,
+                Actuator.is_deleted.is_(False),
+            )
+        )
+        if actuator is None:
+            sequence_number = int(
+                await db.scalar(
+                    select(func.max(Actuator.sequence_number)).where(
+                        Actuator.device_id == device.id
+                    )
+                )
+                or 0
+            ) + 1
+            actuator = Actuator(
+                device_id=device.id,
+                actuator_model_id=model.id,
+                sequence_number=sequence_number,
+                code=validate_local_actuator_code(
+                    mapping.code,
+                    project_code=device.project.code,
+                    device_code=device.code,
+                ),
+                name=mapping.default_name or model.name,
+                location=mapping.default_location,
+                notes=mapping.default_notes,
+                is_enabled=mapping.is_enabled,
+                desired_state=mapping.default_state,
+            )
+            db.add(actuator)
+            await db.flush()
+            await sync_new_actuator_to_scenarios(
+                db,
+                device=device,
+                actuator=actuator,
+                actor_id=actor_id,
+            )
+            created += 1
+        await ensure_automatic_feeder_config(db, actuator=actuator)
+    await db.flush()
+    return created
 
 
 async def seed_scenario_catalog(db: AsyncSession, device_template_id: int) -> int:
@@ -863,6 +965,9 @@ async def seed() -> None:
         scenario_catalog_id = await seed_scenario_catalog(db, device_template_id)
         await sync_scenario_catalogs_for_template(db, device_template_id)
         await backfill_split_water_level_resources(db, scenario_catalog_id)
+        await backfill_automatic_feeder_resources(
+            db, device_template_id, actor_id=admin.id
+        )
         roles = {role.code: role.id for role in (await db.scalars(select(Role))).all()}
         if roles:
             admin.role_id = roles.get(UserRole.ADMIN.value)

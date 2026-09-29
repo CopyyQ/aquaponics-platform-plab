@@ -11,7 +11,7 @@ from app.core.config import settings
 from app.models.actuator import Actuator, ActuatorCommand
 from app.models.device import Device
 from app.mqtt import publisher
-
+from app.services.automatic_feeder_runtime_service import mark_feeder_failed
 
 RETRY_DELAYS_SECONDS = (1, 2, 4, 8, 15, 30)
 _NON_TERMINAL_STATUSES = ("PENDING", "PUBLISHED")
@@ -76,14 +76,26 @@ async def dispatch_due_actuator_commands(
 
         failure_code: str | None = None
         try:
-            await asyncio.to_thread(
-                publisher.publish_actuator_command,
-                device.code,
-                command.id,
-                actuator.code,
-                command.desired_state,
-                command.requested_at.isoformat(),
-            )
+            if command.command_type == "FEED":
+                await asyncio.to_thread(
+                    publisher.publish_actuator_command,
+                    device.code,
+                    command.id,
+                    actuator.code,
+                    command.desired_state,
+                    command.requested_at.isoformat(),
+                    command_type=command.command_type,
+                    command_payload=command.command_payload,
+                )
+            else:
+                await asyncio.to_thread(
+                    publisher.publish_actuator_command,
+                    device.code,
+                    command.id,
+                    actuator.code,
+                    command.desired_state,
+                    command.requested_at.isoformat(),
+                )
         except publisher.MqttPublishError as exc:
             failure_code = exc.code
         except Exception:
@@ -101,6 +113,13 @@ async def dispatch_due_actuator_commands(
                 command.failed_at = attempt_at
                 command.next_publish_attempt_at = None
                 command.failure_reason = "MQTT_PUBLISH_RETRIES_EXHAUSTED"
+                if command.command_type == "FEED":
+                    await mark_feeder_failed(
+                        db,
+                        command_id=command.id,
+                        reason="MQTT_PUBLISH_RETRIES_EXHAUSTED",
+                        at=attempt_at,
+                    )
             else:
                 command.next_publish_attempt_at = attempt_at + timedelta(
                     seconds=retry_delay_seconds(command.publish_attempt_count)

@@ -28,7 +28,6 @@ from scripts.seed import (
     SENSOR_MODELS,
 )
 
-
 EXPECTED_SENSOR_CODES = (
     "NH3",
     "NO3",
@@ -54,6 +53,7 @@ EXPECTED_ACTUATOR_CODES = (
     "GROW_LIGHT",
     "WARNING_LIGHT",
     "WARNING_BUZZER",
+    "AUTOMATIC_FEEDER",
 )
 
 
@@ -66,7 +66,7 @@ def test_sensor_catalog_is_exactly_the_approved_aquaponics_set() -> None:
 def test_actuator_catalog_is_exactly_the_approved_aquaponics_set() -> None:
     codes = tuple(item[0] for item in ACTUATOR_MODELS)
     assert codes == EXPECTED_ACTUATOR_CODES
-    assert len(codes) == len(set(codes)) == 8
+    assert len(codes) == len(set(codes)) == 9
 
 
 def test_canonical_device_template_identity() -> None:
@@ -94,7 +94,7 @@ async def test_seed_persists_exact_canonical_hardware_catalog() -> None:
         assert set(sensor_codes) == set(EXPECTED_SENSOR_CODES)
         assert len(sensor_codes) == 13
         assert set(actuator_codes) == set(EXPECTED_ACTUATOR_CODES)
-        assert len(actuator_codes) == 8
+        assert len(actuator_codes) == 9
         assert len(templates) == 1
 
         template = templates[0]

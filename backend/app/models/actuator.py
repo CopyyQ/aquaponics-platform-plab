@@ -4,14 +4,30 @@ from datetime import datetime
 from typing import TYPE_CHECKING
 from uuid import UUID, uuid4
 
-from sqlalchemy import BigInteger, Boolean, CheckConstraint, DateTime, Float, ForeignKey, Identity, Index, Integer, String, Text, UniqueConstraint, text
-from sqlalchemy.orm import Mapped, mapped_column, relationship
+from sqlalchemy import (
+    BigInteger,
+    Boolean,
+    CheckConstraint,
+    DateTime,
+    Float,
+    ForeignKey,
+    Identity,
+    Index,
+    Integer,
+    String,
+    Text,
+    UniqueConstraint,
+    text,
+)
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.dialects.postgresql import UUID as PGUUID
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base, SoftDeleteMixin, TimestampMixin
 
 if TYPE_CHECKING:
     from app.models.actuator_model import ActuatorModel
+    from app.models.automatic_feeder import AutomaticFeederConfig, AutomaticFeederEvent
     from app.models.device import Device
     from app.models.user import User
 
@@ -73,20 +89,29 @@ class Actuator(Base, TimestampMixin, SoftDeleteMixin):
     )
     removed_reason: Mapped[str | None] = mapped_column(Text)
 
-    device: Mapped["Device"] = relationship(back_populates="actuators")
-    actuator_model: Mapped["ActuatorModel | None"] = relationship(lazy="joined")
-    disabled_by: Mapped["User | None"] = relationship(foreign_keys=[disabled_by_user_id])
-    removed_by: Mapped["User | None"] = relationship(foreign_keys=[removed_by_user_id])
-    commands: Mapped[list["ActuatorCommand"]] = relationship(
+    device: Mapped[Device] = relationship(back_populates="actuators")
+    actuator_model: Mapped[ActuatorModel | None] = relationship(lazy="joined")
+    disabled_by: Mapped[User | None] = relationship(foreign_keys=[disabled_by_user_id])
+    removed_by: Mapped[User | None] = relationship(foreign_keys=[removed_by_user_id])
+    commands: Mapped[list[ActuatorCommand]] = relationship(
         back_populates="actuator", cascade="all, delete-orphan"
     )
-    state_history: Mapped[list["ActuatorStateHistory"]] = relationship(
+    state_history: Mapped[list[ActuatorStateHistory]] = relationship(
         back_populates="actuator", cascade="all, delete-orphan"
     )
-    readings: Mapped[list["ActuatorReading"]] = relationship(
+    readings: Mapped[list[ActuatorReading]] = relationship(
         back_populates="actuator", cascade="all, delete-orphan"
     )
     threshold_alert_configs = relationship("ThresholdAlertConfig", back_populates="actuator")
+    feeder_config: Mapped[AutomaticFeederConfig | None] = relationship(
+        back_populates="actuator",
+        uselist=False,
+        cascade="all, delete-orphan",
+        single_parent=True,
+    )
+    feeder_events: Mapped[list[AutomaticFeederEvent]] = relationship(
+        back_populates="actuator", cascade="all, delete-orphan"
+    )
 
 
 class ActuatorReading(Base):
@@ -111,7 +136,7 @@ class ActuatorReading(Base):
     legacy_source_key: Mapped[str | None] = mapped_column(String(180))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=text("now()"))
 
-    actuator: Mapped["Actuator"] = relationship(back_populates="readings")
+    actuator: Mapped[Actuator] = relationship(back_populates="readings")
 
 
 class ActuatorCommand(Base, TimestampMixin):
@@ -129,6 +154,8 @@ class ActuatorCommand(Base, TimestampMixin):
         BigInteger, ForeignKey("actuators.id", ondelete="RESTRICT"), index=True
     )
     desired_state: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    command_type: Mapped[str] = mapped_column(String(30), nullable=False, default="SET_STATE", server_default="SET_STATE")
+    command_payload: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict, server_default=text("'{}'::jsonb"))
     reported_state: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
     status: Mapped[str] = mapped_column(String(30), default="PENDING", nullable=False)
     requested_by_user_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("users.id", ondelete="RESTRICT"))
@@ -143,7 +170,7 @@ class ActuatorCommand(Base, TimestampMixin):
     timed_out_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     failure_reason: Mapped[str | None] = mapped_column(Text)
 
-    actuator: Mapped["Actuator"] = relationship(back_populates="commands")
+    actuator: Mapped[Actuator] = relationship(back_populates="commands")
 
 
 class ActuatorStateHistory(Base):
@@ -163,4 +190,4 @@ class ActuatorStateHistory(Base):
         BigInteger, ForeignKey("actuator_commands.id", ondelete="SET NULL"), nullable=True
     )
 
-    actuator: Mapped["Actuator"] = relationship(back_populates="state_history")
+    actuator: Mapped[Actuator] = relationship(back_populates="state_history")

@@ -8,6 +8,7 @@ from app.core.enums import AggregatePeriod
 from app.jobs.actuator_command_dispatcher import dispatch_actuator_commands_once
 from app.jobs.actuator_command_timeout import timeout_actuator_commands
 from app.jobs.auth_cleanup import cleanup_auth_state
+from app.jobs.automatic_feeder import run_automatic_feeder_scheduler
 from app.jobs.notification_outbox import dispatch_operational_notifications
 from app.jobs.offline_scanner import scan_offline_state
 from app.jobs.project_health_evaluator import evaluate_project_health
@@ -31,6 +32,10 @@ async def _run_job(job_name: str, job) -> bool:
 async def run_scheduler_cycle(now: datetime | None = None) -> bool:
     cycle_time = now or datetime.now(UTC)
     results = [
+        await _run_job(
+            "automatic_feeder",
+            lambda: run_automatic_feeder_scheduler(now=cycle_time),
+        ),
         await _run_job("offline_scanner", scan_offline_state),
         await _run_job("actuator_command_timeout", timeout_actuator_commands),
         await _run_job("auth_cleanup", cleanup_auth_state),

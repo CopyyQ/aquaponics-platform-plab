@@ -40,6 +40,7 @@ class Settings(BaseSettings):
     mqtt_ack_topic: str = "aquaponics/+/command-ack"
     mqtt_qos: int = Field(default=1, ge=0, le=2)
     actuator_command_timeout_seconds: int = 45
+    feeder_schedule_grace_seconds: int = Field(default=120, ge=30, le=3600)
     actuator_command_dispatch_interval_seconds: float = Field(default=1.0, ge=0.2, le=60)
     actuator_command_publish_max_attempts: int = Field(default=7, ge=1, le=20)
     actuator_command_publish_batch_size: int = Field(default=20, ge=1, le=200)

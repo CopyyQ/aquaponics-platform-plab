@@ -14,6 +14,10 @@ from app.models.sensor import Sensor
 from app.models.user import User
 from app.services.actuator_identity_service import validate_local_actuator_code
 from app.services.audit_service import write_audit
+from app.services.automatic_feeder_service import (
+    AUTOMATIC_FEEDER_MODEL_CODE,
+    ensure_automatic_feeder_config,
+)
 from app.services.project_scenario_sync_service import (
     clone_catalog_to_project_scenario,
 )
@@ -114,23 +118,25 @@ async def _materialize_device(
         )
 
     for sequence_number, mapping in enumerate(template.actuator_mappings, start=1):
-        db.add(
-            Actuator(
-                device_id=device.id,
-                actuator_model_id=mapping.actuator_model_id,
-                sequence_number=sequence_number,
-                code=validate_local_actuator_code(
-                    mapping.code,
-                    project_code=system.code,
-                    device_code=device.code,
-                ),
-                name=mapping.default_name or mapping.actuator_model.name,
-                location=mapping.default_location,
-                notes=mapping.default_notes,
-                is_enabled=mapping.is_enabled,
-                desired_state=mapping.default_state,
-            )
+        actuator = Actuator(
+            device_id=device.id,
+            actuator_model_id=mapping.actuator_model_id,
+            sequence_number=sequence_number,
+            code=validate_local_actuator_code(
+                mapping.code,
+                project_code=system.code,
+                device_code=device.code,
+            ),
+            name=mapping.default_name or mapping.actuator_model.name,
+            location=mapping.default_location,
+            notes=mapping.default_notes,
+            is_enabled=mapping.is_enabled,
+            desired_state=mapping.default_state,
         )
+        db.add(actuator)
+        await db.flush()
+        if mapping.actuator_model.code == AUTOMATIC_FEEDER_MODEL_CODE:
+            await ensure_automatic_feeder_config(db, actuator=actuator)
     await db.flush()
     return device
 

@@ -36,6 +36,7 @@ from app.schemas.alert_scenario import (
     AlertScenarioRead,
     AlertScenarioUpdate,
 )
+from app.schemas.automatic_feeder import AutomaticFeederRead, AutomaticFeederUpdate
 from app.schemas.project import AquaponicsSystemMqttConfigExport
 from app.schemas.telemetry import TelemetryReadingRead
 from app.schemas.threshold_alert_config import (
@@ -61,11 +62,20 @@ from app.services.aquaponics_system_creation_service import (
     AquaponicsSystemCreationError,
     create_aquaponics_system,
 )
+from app.services.automatic_feeder_runtime_service import create_manual_feeder_event
+from app.services.automatic_feeder_service import (
+    AUTOMATIC_FEEDER_MODEL_CODE,
+    build_feed_command_payload,
+    ensure_automatic_feeder_config,
+    get_automatic_feeder_read,
+    update_automatic_feeder_config,
+)
 from app.services.operational_incident_service import (
     enqueue_incident_notification,
     reevaluate_latest_sensor_threshold,
 )
 from app.services.permission_service import has_permission
+from app.services.project_activity_service import record_project_activity
 from app.services.project_device_config_service import export_project_device_config
 from app.services.project_scenario_sync_service import (
     retire_actuator_from_scenarios,
@@ -179,6 +189,7 @@ class ActuatorUpdate(BaseModel):
     location: str | None = None
     notes: str | None = None
     is_enabled: bool | None = None
+    feeder: AutomaticFeederUpdate | None = None
 
 
 class SensorRead(BaseModel):
@@ -206,6 +217,7 @@ class ActuatorRead(BaseModel):
     reported_state: bool | None
     voltage_v: float | None
     current_a: float | None
+    feeder: AutomaticFeederRead | None = None
 
 
 class DeviceRead(BaseModel):
@@ -226,8 +238,8 @@ def _sensor_read(sensor: Sensor) -> dict:
     return {"id": sensor.public_id, "device_id": sensor.device.public_id, "sensor_model_id": sensor.sensor_model_id, "code": sensor.code, "name": sensor.name, "installation_location": sensor.installation_location, "description": sensor.description, "status": sensor.status, "is_enabled": sensor.is_enabled}
 
 
-def _actuator_read(actuator: Actuator) -> dict:
-    return {"id": actuator.public_id, "device_id": actuator.device.public_id, "actuator_model_id": actuator.actuator_model_id, "code": actuator.code, "name": actuator.name, "location": actuator.location, "notes": actuator.notes, "is_enabled": actuator.is_enabled, "desired_state": actuator.desired_state, "reported_state": actuator.reported_state, "voltage_v": actuator.voltage_v, "current_a": actuator.current_a}
+def _actuator_read(actuator: Actuator, *, feeder: dict | None = None) -> dict:
+    return {"id": actuator.public_id, "device_id": actuator.device.public_id, "actuator_model_id": actuator.actuator_model_id, "code": actuator.code, "name": actuator.name, "location": actuator.location, "notes": actuator.notes, "is_enabled": actuator.is_enabled, "desired_state": actuator.desired_state, "reported_state": actuator.reported_state, "voltage_v": actuator.voltage_v, "current_a": actuator.current_a, "feeder": feeder}
 
 
 def _sensor_threshold_from_defaults(sensor_id: int, *, model: SensorModel, mapping: DeviceTemplateSensor | None = None) -> ThresholdAlertConfig | None:
@@ -296,8 +308,17 @@ async def _device(db: AsyncSession, system_id: UUID, device_id: UUID, actor: Use
     system = await _public_system(db, system_id, actor, manage=manage)
     try: item = await get_device_by_public_id(db, system, device_id)
     except PublicIdentityNotFoundError as exc: raise HTTPException(404, str(exc)) from exc
-    await db.refresh(item, attribute_names=["project", "sensors", "actuators"])
-    return item
+    loaded = await db.scalar(
+        select(Device)
+        .options(
+            selectinload(Device.project),
+            selectinload(Device.sensors).selectinload(Sensor.device),
+            selectinload(Device.actuators).selectinload(Actuator.device),
+        )
+        .where(Device.id == item.id)
+    )
+    assert loaded is not None
+    return loaded
 
 
 async def _sensor(db: AsyncSession, system_id: UUID, device_id: UUID, sensor_id: UUID, actor: User, *, manage: bool = False) -> Sensor:
@@ -560,14 +581,22 @@ async def delete_sensor(system_id: UUID, device_id: UUID, sensor_id: UUID, db: A
 
 @router.get("/{system_id}/devices/{device_id}/actuators", response_model=list[ActuatorRead], tags=["Actuators"])
 async def list_actuators(system_id: UUID, device_id: UUID, db: AsyncSession = Depends(get_db), actor: User = Depends(require_permission("actuators.read"))) -> list[dict]:
-    return [_actuator_read(item) for item in (await _device(db, system_id, device_id, actor)).actuators if not item.is_deleted and item.removed_at is None]
+    device = await _device(db, system_id, device_id, actor)
+    result: list[dict] = []
+    for item in device.actuators:
+        if item.is_deleted or item.removed_at is not None:
+            continue
+        feeder = await get_automatic_feeder_read(db, actuator=item)
+        result.append(_actuator_read(item, feeder=feeder))
+    return result
 
 
 @router.post("/{system_id}/devices/{device_id}/actuators", response_model=ActuatorRead, status_code=status.HTTP_201_CREATED, tags=["Actuators"])
 async def create_actuator(system_id: UUID, device_id: UUID, payload: ActuatorInput, db: AsyncSession = Depends(get_db), actor: User = Depends(require_permission("actuators.create"))) -> dict:
     device = await _device(db, system_id, device_id, actor, manage=True)
     code = _local_actuator_code(payload.code, system=device.project, device=device)
-    if await db.get(ActuatorModel, payload.actuator_model_id) is None:
+    model = await db.get(ActuatorModel, payload.actuator_model_id)
+    if model is None:
         raise HTTPException(status_code=422, detail="Actuator model không tồn tại")
     if await db.scalar(select(Actuator.id).where(Actuator.device_id == device.id, Actuator.code == code)):
         raise HTTPException(status_code=409, detail="Mã Actuator đã tồn tại")
@@ -575,6 +604,8 @@ async def create_actuator(system_id: UUID, device_id: UUID, payload: ActuatorInp
     item = Actuator(device_id=device.id, sequence_number=sequence, **payload.model_dump(exclude={"code"}), code=code)
     db.add(item)
     await db.flush()
+    if model.code == AUTOMATIC_FEEDER_MODEL_CODE:
+        await ensure_automatic_feeder_config(db, actuator=item)
     await sync_new_actuator_to_scenarios(
         db,
         device=device,
@@ -583,25 +614,59 @@ async def create_actuator(system_id: UUID, device_id: UUID, payload: ActuatorInp
     )
     await db.commit()
     await db.refresh(item)
-    await db.refresh(item, attribute_names=["device"])
-    return _actuator_read(item)
+    await db.refresh(item, attribute_names=["device", "actuator_model"])
+    feeder = await get_automatic_feeder_read(db, actuator=item)
+    return _actuator_read(item, feeder=feeder)
 
 
 @router.get("/{system_id}/devices/{device_id}/actuators/{actuator_id}", response_model=ActuatorRead, tags=["Actuators"])
 async def get_actuator(system_id: UUID, device_id: UUID, actuator_id: UUID, db: AsyncSession = Depends(get_db), actor: User = Depends(require_permission("actuators.read"))) -> dict:
-    return _actuator_read(await _actuator(db, system_id, device_id, actuator_id, actor))
+    item = await _actuator(db, system_id, device_id, actuator_id, actor)
+    feeder = await get_automatic_feeder_read(db, actuator=item)
+    return _actuator_read(item, feeder=feeder)
 
 
 @router.patch("/{system_id}/devices/{device_id}/actuators/{actuator_id}", response_model=ActuatorRead, tags=["Actuators"])
 async def update_actuator(system_id: UUID, device_id: UUID, actuator_id: UUID, payload: ActuatorUpdate, db: AsyncSession = Depends(get_db), actor: User = Depends(require_permission("actuators.update"))) -> dict:
     item = await _actuator(db, system_id, device_id, actuator_id, actor, manage=True)
     changes = payload.model_dump(exclude_unset=True)
+    changes.pop("feeder", None)
     if "code" in changes:
         changes["code"] = _local_actuator_code(changes["code"], system=item.device.project, device=item.device)
     for field, value in changes.items(): setattr(item, field, value)
+
+    before_feeder = await get_automatic_feeder_read(db, actuator=item)
+    feeder = (
+        await update_automatic_feeder_config(db, actuator=item, payload=payload.feeder)
+        if payload.feeder is not None
+        else before_feeder
+    )
+    if payload.feeder is not None and before_feeder is not None and feeder is not None:
+        feeder_changes = {
+            key: {"before": before_feeder[key], "after": feeder[key]}
+            for key in (
+                "feed_level",
+                "free_output_value",
+                "free_output_unit",
+                "schedule_enabled",
+                "schedule",
+            )
+            if before_feeder[key] != feeder[key]
+        }
+        if feeder_changes:
+            await record_project_activity(
+                db,
+                project_id=item.device.project_id,
+                actor=actor,
+                action="AUTOMATIC_FEEDER_UPDATED",
+                entity_type="ACTUATOR",
+                entity_id=item.id,
+                entity_name=item.name,
+                changes=feeder_changes,
+            )
     await db.commit()
-    await db.refresh(item)
-    return _actuator_read(item)
+    await db.refresh(item, attribute_names=["device"])
+    return _actuator_read(item, feeder=feeder)
 
 
 @router.delete("/{system_id}/devices/{device_id}/actuators/{actuator_id}", status_code=status.HTTP_204_NO_CONTENT, tags=["Actuators"])
@@ -742,19 +807,35 @@ async def actuator_readings(system_id: UUID, device_id: UUID, actuator_id: UUID,
 async def actuator_commands(system_id: UUID, device_id: UUID, actuator_id: UUID, limit: int = Query(default=100, ge=1, le=500), db: AsyncSession = Depends(get_db), actor: User = Depends(require_permission("actuators.commands.read"))) -> list[dict]:
     actuator = await _actuator(db, system_id, device_id, actuator_id, actor)
     rows = list((await db.scalars(select(ActuatorCommand).where(ActuatorCommand.actuator_id == actuator.id).order_by(ActuatorCommand.requested_at.desc()).limit(limit))).all())
-    return [{"command_id": row.id, "actuator_id": actuator.public_id, "desired_state": row.desired_state, "reported_state": row.reported_state, "status": row.status, "requested_at": row.requested_at} for row in rows]
+    return [{"command_id": row.id, "actuator_id": actuator.public_id, "command_type": row.command_type, "params": row.command_payload, "desired_state": row.desired_state, "reported_state": row.reported_state, "status": row.status, "requested_at": row.requested_at} for row in rows]
 
 
-@router.post("/{system_id}/devices/{device_id}/actuators/{actuator_id}/commands", response_model=ActuatorCommandRead, status_code=status.HTTP_201_CREATED, tags=["Actuators"])
+@router.post("/{system_id}/devices/{device_id}/actuators/{actuator_id}/commands", response_model=ActuatorCommandRead, status_code=status.HTTP_202_ACCEPTED, tags=["Actuators"])
 async def create_actuator_command(system_id: UUID, device_id: UUID, actuator_id: UUID, payload: ActuatorCommandCreate, db: AsyncSession = Depends(get_db), actor: User = Depends(require_permission("actuators.commands.create"))) -> dict:
     actuator = await _actuator(db, system_id, device_id, actuator_id, actor, manage=True)
+    if payload.command_type == "FEED":
+        command_payload = await build_feed_command_payload(
+            db, actuator=actuator, params=payload.params
+        )
+        desired_state = True
+    else:
+        command_payload = {}
+        assert payload.desired_state is not None
+        desired_state = payload.desired_state
     command = await enqueue_actuator_command(
         db,
         actuator=actuator,
-        desired_state=payload.desired_state,
+        desired_state=desired_state,
         requested_by_user_id=actor.id,
+        command_type=payload.command_type,
+        command_payload=command_payload,
+        commit=payload.command_type != "FEED",
     )
-    return {"command_id": command.id, "actuator_id": actuator.public_id, "desired_state": command.desired_state, "reported_state": command.reported_state, "status": command.status, "requested_at": command.requested_at}
+    if payload.command_type == "FEED":
+        await create_manual_feeder_event(db, actuator=actuator, command=command)
+        await db.commit()
+        await db.refresh(command)
+    return {"command_id": command.id, "actuator_id": actuator.public_id, "command_type": command.command_type, "params": command.command_payload, "desired_state": command.desired_state, "reported_state": command.reported_state, "status": command.status, "requested_at": command.requested_at}
 
 
 async def _actuator(db: AsyncSession, system_id: UUID, device_id: UUID, actuator_id: UUID, actor: User, *, manage: bool = False) -> Actuator:

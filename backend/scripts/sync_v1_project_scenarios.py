@@ -15,6 +15,8 @@ from app.models.project_scenario import (
 )
 
 V1_REVISION = "v1"
+V2_FEEDER_REVISION = "v2_automatic_feeder"
+SUPPORTED_REVISIONS = {V1_REVISION, V2_FEEDER_REVISION}
 ACTIVE_INCIDENT_STATUSES = ("PENDING", "OPEN", "ACKNOWLEDGED")
 
 
@@ -22,13 +24,17 @@ def _table(bind: sa.Connection, name: str) -> sa.Table:
     return sa.Table(name, sa.MetaData(), autoload_with=bind)
 
 
-def _assert_v1_revision(bind: sa.Connection) -> None:
+def _current_revisions(bind: sa.Connection) -> list[str]:
     inspector = sa.inspect(bind)
     if not inspector.has_table("alembic_version"):
-        raise RuntimeError("V1_SCENARIO_SYNC_REQUIRES_ALEMBIC_V1")
-    versions = list(
+        return []
+    return list(
         bind.execute(sa.text("SELECT version_num FROM alembic_version")).scalars()
     )
+
+
+def _assert_v1_revision(bind: sa.Connection) -> None:
+    versions = _current_revisions(bind)
     if versions != [V1_REVISION]:
         raise RuntimeError(
             "V1_SCENARIO_SYNC_REQUIRES_ALEMBIC_V1:"
@@ -36,10 +42,17 @@ def _assert_v1_revision(bind: sa.Connection) -> None:
         )
 
 
-def _ensure_v1_project_scenario_schema(bind: sa.Connection) -> None:
-    """Synchronize only the ProjectScenario additions while retaining revision v1."""
-    _assert_v1_revision(bind)
+def _assert_supported_revision(bind: sa.Connection) -> str:
+    versions = _current_revisions(bind)
+    if len(versions) != 1 or versions[0] not in SUPPORTED_REVISIONS:
+        raise RuntimeError(
+            "PROJECT_SCENARIO_SYNC_UNSUPPORTED_ALEMBIC_REVISION:"
+            + ",".join(str(value) for value in versions)
+        )
+    return versions[0]
 
+
+def _ensure_project_scenario_schema(bind: sa.Connection) -> None:
     ProjectScenario.__table__.create(bind, checkfirst=True)
     ProjectScenarioItem.__table__.create(bind, checkfirst=True)
     ProjectScenarioBranch.__table__.create(bind, checkfirst=True)
@@ -133,6 +146,12 @@ def _ensure_v1_project_scenario_schema(bind: sa.Connection) -> None:
             )
         )
 
+
+
+def _ensure_v1_project_scenario_schema(bind: sa.Connection) -> None:
+    """Legacy v1-only helper retained for direct v1 repair tests/tools."""
+    _assert_v1_revision(bind)
+    _ensure_project_scenario_schema(bind)
     _assert_v1_revision(bind)
 
 
@@ -717,10 +736,11 @@ def _backfill_project_scenarios(bind: sa.Connection) -> int:
 
 
 def _sync_v1_project_scenarios(bind: sa.Connection) -> int:
-    _assert_v1_revision(bind)
-    _ensure_v1_project_scenario_schema(bind)
+    revision = _assert_supported_revision(bind)
+    _ensure_project_scenario_schema(bind)
     created = _backfill_project_scenarios(bind)
-    _assert_v1_revision(bind)
+    if _current_revisions(bind) != [revision]:
+        raise RuntimeError("PROJECT_SCENARIO_SYNC_CHANGED_ALEMBIC_REVISION")
     return created
 
 
@@ -731,9 +751,11 @@ async def sync_v1_project_scenarios() -> int:
 
 async def _main() -> None:
     created = await sync_v1_project_scenarios()
+    async with engine.connect() as connection:
+        revision = await connection.scalar(sa.text("SELECT version_num FROM alembic_version"))
     print(
-        "V1_PROJECT_SCENARIO_SYNC_OK "
-        f"created_scenarios={created} alembic_revision={V1_REVISION}"
+        "PROJECT_SCENARIO_SYNC_OK "
+        f"created_scenarios={created} alembic_revision={revision}"
     )
 
 

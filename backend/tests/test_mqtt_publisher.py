@@ -143,3 +143,33 @@ def test_publisher_reports_publish_timeout(monkeypatch) -> None:
         )
 
     assert caught.value.code == "MQTT_TIMEOUT"
+
+
+def test_publisher_adds_feeder_fields_without_changing_legacy_payload(monkeypatch) -> None:
+    client = _Client()
+    monkeypatch.setattr(publisher.mqtt, "Client", lambda *_args, **_kwargs: client)
+
+    publisher.publish_actuator_command(
+        "DEVICE-01",
+        51,
+        "FEEDER-01",
+        True,
+        "2026-09-28T08:00:00+00:00",
+        command_type="FEED",
+        command_payload={
+            "feed_level": "LEVEL_2",
+            "free_output_value": None,
+            "free_output_unit": None,
+        },
+    )
+
+    assert client.publish_args is not None
+    _topic, raw_payload, _qos, _retain = client.publish_args
+    assert json.loads(raw_payload) == {
+        "command_id": "51",
+        "actuator_code": "FEEDER-01",
+        "desired_state": True,
+        "requested_at": "2026-09-28T08:00:00+00:00",
+        "command_type": "FEED",
+        "feed_level": "LEVEL_2",
+    }

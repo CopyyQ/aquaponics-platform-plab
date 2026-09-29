@@ -8,6 +8,7 @@ from app.db.session import async_session_factory
 from app.models.actuator import Actuator, ActuatorCommand
 from app.models.device import Device
 from app.services.audit_service import write_audit
+from app.services.automatic_feeder_runtime_service import mark_feeder_failed
 from app.services.project_notification_service import dispatch_actuator_command_transition
 
 logger = logging.getLogger(__name__)
@@ -32,6 +33,13 @@ async def timeout_actuator_commands(*, now: datetime | None = None) -> int:
         for command, actuator, device in rows:
             command.status = "TIMEOUT"
             command.timed_out_at = timed_out_at
+            if command.command_type == "FEED":
+                await mark_feeder_failed(
+                    db,
+                    command_id=command.id,
+                    reason="TIMEOUT",
+                    at=timed_out_at,
+                )
             await write_audit(
                 db,
                 user_id=command.requested_by_user_id,

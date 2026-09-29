@@ -9,23 +9,33 @@ def disposable_runtime_fixture():
     yield
 
 
-def test_alembic_history_is_single_v1_baseline() -> None:
+def test_alembic_history_keeps_v1_frozen_and_adds_feeder_v2() -> None:
     versions = Path("alembic/versions")
     revisions = sorted(
         path
         for path in versions.glob("*.py")
         if path.name != "__init__.py"
     )
-    assert [path.name for path in revisions] == ["v1_baseline.py"]
+    assert [path.name for path in revisions] == [
+        "v1_baseline.py",
+        "v2_automatic_feeder.py",
+    ]
 
-    module_spec = spec_from_file_location("v1_baseline", revisions[0])
-    assert module_spec is not None
-    assert module_spec.loader is not None
-    module = module_from_spec(module_spec)
-    module_spec.loader.exec_module(module)
+    v1_spec = spec_from_file_location("v1_baseline", versions / "v1_baseline.py")
+    assert v1_spec is not None and v1_spec.loader is not None
+    v1 = module_from_spec(v1_spec)
+    v1_spec.loader.exec_module(v1)
+    assert v1.revision == "v1"
+    assert v1.down_revision is None
 
-    assert module.revision == "v1"
-    assert module.down_revision is None
+    v2_spec = spec_from_file_location(
+        "v2_automatic_feeder", versions / "v2_automatic_feeder.py"
+    )
+    assert v2_spec is not None and v2_spec.loader is not None
+    v2 = module_from_spec(v2_spec)
+    v2_spec.loader.exec_module(v2)
+    assert v2.revision == "v2_automatic_feeder"
+    assert v2.down_revision == "v1"
 
 
 def test_alembic_env_has_no_legacy_revision_compatibility_filters() -> None:

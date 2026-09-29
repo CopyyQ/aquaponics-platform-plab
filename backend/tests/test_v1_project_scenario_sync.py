@@ -294,10 +294,35 @@ async def test_v1_backfill_creates_one_active_scenario_with_all_device_resources
 @pytest.mark.asyncio
 async def test_v1_schema_sync_is_idempotent_and_keeps_revision_v1() -> None:
     async with AsyncSessionLocal() as db:
-        connection = await db.connection()
+        current = await db.scalar(text("SELECT version_num FROM alembic_version"))
+        assert current == "v2_automatic_feeder"
 
+        # The helper is intentionally a legacy v1-only repair path. Simulate a
+        # deployed v1 stamp inside this transaction, then roll it back so the
+        # shared test database remains at the real current head.
+        await db.execute(text("UPDATE alembic_version SET version_num = 'v1'"))
+        connection = await db.connection()
         await connection.run_sync(_ensure_v1_project_scenario_schema)
         await connection.run_sync(_ensure_v1_project_scenario_schema)
 
         version = await db.scalar(text("SELECT version_num FROM alembic_version"))
         assert version == "v1"
+        await db.rollback()
+
+    async with AsyncSessionLocal() as db:
+        restored = await db.scalar(text("SELECT version_num FROM alembic_version"))
+        assert restored == "v2_automatic_feeder"
+
+@pytest.mark.asyncio
+async def test_entrypoint_project_scenario_sync_accepts_feeder_v2_and_preserves_head() -> None:
+    from scripts.sync_v1_project_scenarios import _sync_v1_project_scenarios
+
+    async with AsyncSessionLocal() as db:
+        before = await db.scalar(text("SELECT version_num FROM alembic_version"))
+        assert before == "v2_automatic_feeder"
+        connection = await db.connection()
+        created = await connection.run_sync(_sync_v1_project_scenarios)
+        assert created >= 0
+        after = await db.scalar(text("SELECT version_num FROM alembic_version"))
+        assert after == "v2_automatic_feeder"
+        await db.rollback()

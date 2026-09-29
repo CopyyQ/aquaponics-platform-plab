@@ -22,16 +22,23 @@ def publish_actuator_command(
     actuator_code: str,
     desired_state: bool,
     requested_at: str,
+    *,
+    command_type: str = "SET_STATE",
+    command_payload: dict | None = None,
 ) -> None:
     topic = settings.mqtt_command_topic.format(device_code=device_code)
-    payload = json.dumps(
-        {
-            "command_id": str(command_id),
-            "actuator_code": actuator_code,
-            "desired_state": desired_state,
-            "requested_at": requested_at,
-        }
-    )
+    message = {
+        "command_id": str(command_id),
+        "actuator_code": actuator_code,
+        "desired_state": desired_state,
+        "requested_at": requested_at,
+    }
+    if command_type == "FEED":
+        message["command_type"] = "FEED"
+        for key, value in (command_payload or {}).items():
+            if value is not None:
+                message[key] = value
+    payload = json.dumps(message)
     timeout_seconds = settings.actuator_command_publish_timeout_seconds
     deadline = time.monotonic() + timeout_seconds
     client = mqtt.Client(

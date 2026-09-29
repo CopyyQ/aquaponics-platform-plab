@@ -1,8 +1,10 @@
 from datetime import datetime
+from typing import Literal
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from app.models.automatic_feeder import FeedLevel
 
 
 class ActuatorCreate(BaseModel):
@@ -84,8 +86,31 @@ class ActuatorReadingRead(BaseModel):
     quality: str
 
 
+class AutomaticFeederCommandParams(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    feed_level: FeedLevel | None = None
+    free_output_value: float | None = Field(default=None, ge=0)
+    free_output_unit: str | None = Field(default=None, min_length=1, max_length=30)
+
+
 class ActuatorCommandCreate(BaseModel):
-    desired_state: bool
+    model_config = ConfigDict(extra="forbid")
+
+    command_type: Literal["SET_STATE", "FEED"] = "SET_STATE"
+    desired_state: bool | None = None
+    params: AutomaticFeederCommandParams | None = None
+
+    @model_validator(mode="after")
+    def validate_command(self) -> "ActuatorCommandCreate":
+        if self.command_type == "SET_STATE":
+            if self.desired_state is None:
+                raise ValueError("SET_STATE yêu cầu desired_state")
+            if self.params is not None:
+                raise ValueError("SET_STATE không nhận params")
+        elif self.desired_state is False:
+            raise ValueError("FEED không cho phép desired_state=false")
+        return self
 
 
 class ActuatorCommandRead(BaseModel):
@@ -93,6 +118,8 @@ class ActuatorCommandRead(BaseModel):
 
     command_id: int
     actuator_id: UUID
+    command_type: str
+    params: dict
     desired_state: bool
     reported_state: bool | None
     status: str

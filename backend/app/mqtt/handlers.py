@@ -13,6 +13,11 @@ from app.services.actuator_state_service import (
     record_actuator_reported_state,
 )
 from app.services.audit_service import write_audit
+from app.services.automatic_feeder_runtime_service import (
+    mark_feeder_completed,
+    mark_feeder_failed,
+    mark_feeder_running,
+)
 from app.services.device_status_service import update_device_status
 from app.services.operational_incident_service import evaluate_alert_scenarios_for_actuator
 from app.services.project_notification_service import dispatch_actuator_command_transition
@@ -87,12 +92,21 @@ async def handle_status(device_code: str, raw_payload: bytes) -> None:
                     received_at=received_at,
                     state_reported_at=payload.sent_at,
                 )
+                matched_command = None
                 if updated or actuator.reported_state == item.state:
-                    await acknowledge_matching_actuator_command(
+                    matched_command = await acknowledge_matching_actuator_command(
                         db,
                         actuator=actuator,
                         reported_state=item.state,
                         acknowledged_at=received_at,
+                    )
+                if matched_command is not None and matched_command.command_type == "FEED" and item.state:
+                    await mark_feeder_running(
+                        db, command_id=matched_command.id, at=received_at
+                    )
+                elif updated and not item.state:
+                    await mark_feeder_completed(
+                        db, actuator_id=actuator.id, at=received_at
                     )
                 if item.voltage_v is not None or item.current_a is not None:
                     recorded_at = item.recorded_at or payload.sent_at
@@ -180,6 +194,18 @@ async def handle_command_ack(device_code: str, raw_payload: bytes) -> None:
             source="COMMAND_ACK",
             command_id=command.id,
         )
+        if command.command_type == "FEED":
+            if payload.status == "FAILED":
+                await mark_feeder_failed(
+                    db,
+                    command_id=command.id,
+                    reason=command.failure_reason or "DEVICE_FAILED",
+                    at=now,
+                )
+            elif payload.reported_state:
+                await mark_feeder_running(db, command_id=command.id, at=now)
+            else:
+                await mark_feeder_completed(db, actuator_id=actuator.id, at=now)
         await write_audit(
             db,
             user_id=command.requested_by_user_id,

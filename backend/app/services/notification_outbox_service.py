@@ -28,6 +28,11 @@ COMMAND_LABELS = {"ACKNOWLEDGED": "Đã xác nhận", "FAILED": "Thất bại", 
 OPERATOR_LABELS = {"LT": "<", "LTE": "≤", "GT": ">", "GTE": "≥", "EQ": "=", "OUTSIDE": "ngoài"}
 
 TELEGRAM_PUSH_INCIDENT_EVENTS = {"OPEN", "RECOVERED"}
+TELEGRAM_PUSH_FEEDER_EVENTS = {
+    "FEEDING_COMPLETED",
+    "FEEDING_FAILED",
+    "FEEDING_MISSED",
+}
 
 
 def telegram_action_keyboard(project_id: int) -> dict:
@@ -326,7 +331,48 @@ def format_project_scenario_message(payload: dict) -> str:
     return "\n".join(lines)
 
 
+def format_feeder_event_message(payload: dict) -> str:
+    event = str(payload.get("event_type") or "")
+    status_label = {
+        "FEEDING_COMPLETED": "HO\u00c0N TH\u00c0NH",
+        "FEEDING_FAILED": "TH\u1ea4T B\u1ea0I",
+        "FEEDING_MISSED": "B\u1ece L\u1ee0",
+    }.get(event, str(payload.get("status") or event))
+    lines = [
+        f"\U0001f37d\ufe0f CHO \u0102N T\u1ef0 \u0110\u1ed8NG \u2014 {status_label}",
+        "",
+        f"H\u1ec7 th\u1ed1ng Aquaponics: {payload.get('project_name', '\u2014')}",
+        f"Thi\u1ebft b\u1ecb: {payload.get('device_name', '\u2014')}",
+        f"M\u00e1y cho \u0103n: {payload.get('actuator_name', '\u2014')}",
+        f"M\u1ee9c th\u1ee9c \u0103n: {payload.get('feed_level', '\u2014')}",
+        f"L\u1ecbch d\u1ef1 ki\u1ebfn: {_display_datetime(payload.get('scheduled_at'))}",
+        f"B\u1eaft \u0111\u1ea7u: {_display_datetime(payload.get('started_at'))}",
+        f"K\u1ebft th\u00fac: {_display_datetime(payload.get('ended_at'))}",
+        f"Tr\u1ea1ng th\u00e1i: {status_label}",
+    ]
+    if payload.get("failure_reason"):
+        lines.append(f"Nguy\u00ean nh\u00e2n: {payload['failure_reason']}")
+    if event == "FEEDING_FAILED":
+        lines.extend(
+            [
+                "",
+                "Khuy\u1ebfn ngh\u1ecb: ki\u1ec3m tra k\u1ebft n\u1ed1i, motor/c\u01a1 c\u1ea5u c\u1ea5p th\u1ee9c \u0103n v\u00e0 ph\u1ea3n h\u1ed3i ACK c\u1ee7a thi\u1ebft b\u1ecb.",
+            ]
+        )
+    elif event == "FEEDING_MISSED":
+        lines.extend(
+            [
+                "",
+                "Khuy\u1ebfn ngh\u1ecb: ki\u1ec3m tra scheduler, k\u1ebft n\u1ed1i thi\u1ebft b\u1ecb v\u00e0 c\u1ea5u h\u00ecnh l\u1ecbch cho \u0103n.",
+            ]
+        )
+    return "\n".join(lines)
+
+
 def format_operational_message(payload: dict) -> str:
+    event_type = str(payload.get("event_type") or "")
+    if payload.get("source_type") == "SYSTEM_EVENT" and event_type in TELEGRAM_PUSH_FEEDER_EVENTS:
+        return format_feeder_event_message(payload)
     if str(payload.get("event_type") or "OPEN") == "RECOVERED":
         return format_recovered_operational_message(payload)
     if payload.get("scenario_name") and payload.get("branch_name"):
@@ -478,6 +524,8 @@ async def evaluate_notification_policy(
         return "NOTIFICATIONS_DISABLED"
     if not settings.telegram_enabled:
         return "TELEGRAM_DISABLED"
+    if source_type == "SYSTEM_EVENT":
+        return None if event_type in TELEGRAM_PUSH_FEEDER_EVENTS else "INCIDENT_ONLY"
     if source_type != "INCIDENT":
         return "INCIDENT_ONLY"
     if event_type == "OPEN":
@@ -505,7 +553,11 @@ async def enqueue_operational_event(
     await db.execute(insert(NotificationOutbox).values(
         incident_id=None, project_id=project_id, source_type="SYSTEM_EVENT",
         event_type=event_type, idempotency_key=f"system-event:{source_key}",
-        payload_snapshot={**payload_snapshot, "source_type": "SYSTEM_EVENT"},
+        payload_snapshot={
+            **payload_snapshot,
+            "source_type": "SYSTEM_EVENT",
+            "event_type": event_type,
+        },
         status="PENDING", available_at=datetime.now(UTC), attempt_count=0,
     ).on_conflict_do_nothing(index_elements=["idempotency_key"]))
 

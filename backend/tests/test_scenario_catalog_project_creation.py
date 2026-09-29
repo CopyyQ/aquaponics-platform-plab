@@ -36,7 +36,7 @@ EXPECTED_SENSOR_CODES = {
 }
 EXPECTED_ACTUATOR_CODES = {
     "FISH_TANK_PUMP", "BIOFILTER_PUMP", "AERATION_PUMP", "FRESH_WATER_VALVE",
-    "FILTER_DRAIN_VALVE", "GROW_LIGHT", "WARNING_LIGHT", "WARNING_BUZZER",
+    "FILTER_DRAIN_VALVE", "GROW_LIGHT", "WARNING_LIGHT", "WARNING_BUZZER", "AUTOMATIC_FEEDER",
 }
 
 
@@ -65,7 +65,7 @@ async def test_seed_scenario_catalog_covers_all_canonical_hardware() -> None:
                 )
             ).all()
         )
-        assert len(items) == 21
+        assert len(items) == 22
 
         sensor_codes = {
             item.sensor_model.code
@@ -200,7 +200,7 @@ async def test_project_creation_materializes_selected_catalogs_once_per_owner() 
                 (await db.scalars(select(Actuator).where(Actuator.device_id == device.id))).all()
             )
             assert len(sensors) == 13
-            assert len(actuators) == 8
+            assert len(actuators) == 9
 
             sensor_ids = [row.id for row in sensors]
             actuator_ids = [row.id for row in actuators]
@@ -237,7 +237,7 @@ async def test_project_creation_materializes_selected_catalogs_once_per_owner() 
             assert scenario.is_active is True
             assert scenario.name == catalog.name
             assert scenario.source_scenario_catalog_id == catalog.id
-            assert len(scenario.items) == len(sensors) + len(actuators) == 21
+            assert len(scenario.items) == len(sensors) + len(actuators) == 22
 
             ph_catalog = next(
                 row
