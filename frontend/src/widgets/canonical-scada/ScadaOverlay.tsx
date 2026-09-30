@@ -12,6 +12,7 @@ import type { ScadaCardStatus, ScadaHealth } from "@/entities/scada/model/scada-
 import { formatRelative } from "@/shared/lib/date"
 import { cn } from "@/shared/lib/utils"
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from "@/shared/ui/dialog"
+import { ScadaAerator } from "./ScadaAerator"
 import { ScadaFlowLayer } from "./ScadaFlowLayer"
 
 // Chỉ đòi `id` của hệ thống vì lớp phủ chỉ dùng nó để dẫn sang trang cảnh báo.
@@ -509,6 +510,7 @@ export function ScadaOverlay({ runtime, localHour }: { runtime: OverlaySource; l
 
         {/* Nằm giữa tranh và các thẻ: nước chảy sau chữ, không che mất số liệu. */}
         {selection.assetUrl ? <ScadaFlowLayer source={runtime} /> : null}
+        {selection.assetUrl ? <ScadaAerator source={runtime} /> : null}
 
         {selection.assetUrl ? (
           <div className="hidden lg:block" data-testid="scada-overlay">

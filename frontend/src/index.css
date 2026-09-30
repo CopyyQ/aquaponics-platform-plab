@@ -96,10 +96,27 @@
    mũi tên chỉ dừng lại tại chỗ chứ không biến mất. */
 .scada-flow-arrow-run { animation: scada-flow-arrow 4s linear infinite; }
 
+/* Bọt khí của máy sủi oxy: nổi từ đáy bể lên mặt nước rồi tan.
+   Quãng nổi và nhịp của từng bọt truyền vào bằng biến, để mỗi bọt một tốc độ. */
+@keyframes scada-bubble {
+  0% { transform: translateY(0); opacity: 0; }
+  15% { opacity: 0.9; }
+  80% { opacity: 0.5; }
+  100% { transform: translateY(var(--scada-bubble-rise)); opacity: 0; }
+}
+
+/* Mặc định trong suốt: chỉ hoạt hình mới làm bọt hiện ra. Nhờ vậy khi người dùng
+   tắt chuyển động, bọt biến mất hẳn thay vì đọng lại một đám tròn dưới đáy bể. */
+.scada-bubble {
+  opacity: 0;
+  animation: scada-bubble var(--scada-bubble-duration) linear infinite;
+}
+
 /* Hoạt hình chạy vô hạn trên màn hình mở cả ngày. Ai đã xin giảm chuyển động thì
    mũi tên đứng yên tại chỗ đã rải đều — vẫn đọc được chiều nước, chỉ là không trôi. */
 @media (prefers-reduced-motion: reduce) {
   .scada-flow-arrow-run { animation: none; }
+  .scada-bubble { animation: none; }
 }
 
 * { @apply border-border; }

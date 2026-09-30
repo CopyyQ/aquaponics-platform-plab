@@ -29,11 +29,18 @@ describe("OperatorDeviceIssuesBoard", () => {
     expect(render([])).toBe("")
   })
 
-  it("names the fault, its cause and what to do", () => {
+  it("names the fault and what to do about it", () => {
     const markup = render([issue()])
     expect(markup).toContain("Bơm bể lọc vi sinh không phản hồi lệnh")
-    expect(markup).toContain("Lệnh gần nhất: TIMEOUT")
     expect(markup).toContain("Kiểm tra kết nối Device")
+  })
+
+  it("keeps the raw technical fields off the owner's screen", () => {
+    // Chủ hệ thống không đọc được mã trạng thái lẫn true/false.
+    const markup = render([issue()])
+    expect(markup).not.toContain("TIMEOUT")
+    expect(markup).not.toContain("Mong muốn")
+    expect(markup).not.toContain("false")
   })
 
   it("warns that these are not recorded, so nobody waits for them in the history", () => {

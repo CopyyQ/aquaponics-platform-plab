@@ -41,8 +41,10 @@ function DeviceIssueCard({ issue }: { issue: ScadaIssue }) {
           </div>
           <div className="min-w-0">
             <h3 className={cn("font-semibold", tone.title)}>{issue.title}</h3>
-            <p className={cn("mt-1 text-sm leading-6", tone.body)}>{issue.root_cause}</p>
-            <p className={cn("text-sm leading-6", tone.body)}>{issue.current_state}</p>
+            {/* Bỏ hẳn root_cause và current_state: chúng in ra nguyên văn kỹ thuật
+                ("Lệnh gần nhất: FAILED", "Mong muốn: false; thực tế: false") — chủ hệ
+                thống không đọc được mã trạng thái lẫn true/false. Tiêu đề đã gọi tên
+                thiết bị, còn việc cần làm thì nằm ở dòng dưới. */}
             <p className={cn("mt-1 text-sm leading-6", tone.body)}>Nên làm: {issue.suggested_action}</p>
             {issue.timestamp ? (
               <p className="mt-2 text-xs text-slate-400">

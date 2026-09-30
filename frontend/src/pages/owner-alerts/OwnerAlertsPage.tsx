@@ -8,7 +8,7 @@ import { splitOperatorAlerts } from "@/widgets/operator-console/operator-console
 import { OperatorAlertsBoard, OperatorAlertsSkeleton } from "@/widgets/operator-console/OperatorAlertsBoard"
 import { OperatorDeviceIssuesBoard } from "@/widgets/operator-console/OperatorDeviceIssuesBoard"
 import { EmptyState } from "@/shared/ui/empty-state"
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/shared/ui/select"
+import { ToggleGroup, ToggleGroupItem } from "@/shared/ui/toggle-group"
 
 export type OwnerAlertFilter = "ALL" | "OPEN" | "RESOLVED"
 
@@ -64,25 +64,6 @@ export function OwnerAlertsPage() {
     gcTime: 60_000,
   })
 
-  const picker = (
-    <Select
-      value={filter}
-      onValueChange={(value) => {
-        // Giữ bộ lọc trên URL để người dùng chia sẻ hoặc tải lại vẫn thấy đúng màn hình
-        setParams(value === "ALL" ? {} : { status: value }, { replace: true })
-      }}
-    >
-      <SelectTrigger className="w-48" aria-label="Lọc trạng thái cảnh báo">
-        <SelectValue />
-      </SelectTrigger>
-      <SelectContent>
-        {OWNER_ALERT_FILTERS.map((item) => (
-          <SelectItem key={item.value} value={item.value}>{item.label}</SelectItem>
-        ))}
-      </SelectContent>
-    </Select>
-  )
-
   if (alerts.isLoading) return <OperatorAlertsSkeleton />
   if (alerts.isError) {
     return <EmptyState icon={AlertTriangle} title="Không thể tải cảnh báo" description={errorMessage(alerts.error)} />
@@ -94,6 +75,40 @@ export function OwnerAlertsPage() {
   // Truyền danh sách cảnh báo rỗng: phần vượt ngưỡng đã nằm trong bảng bên dưới rồi,
   // ở đây chỉ cần những sự cố không có bản ghi nào đại diện.
   const deviceIssues = monitoring.data && showsDeviceIssues(filter) ? deriveScadaIssues(monitoring.data, []) : []
+
+  // Ba lựa chọn ngắn thì bày sẵn cả ba hơn là giấu trong danh sách thả xuống: đỡ một
+  // cú bấm, và nhìn là biết đang lọc gì. Số bên cạnh "Chưa xử lý" cho biết còn bao
+  // nhiêu việc phải làm mà không cần đổi bộ lọc.
+  const picker = (
+    <ToggleGroup
+      type="single"
+      value={filter}
+      variant="outline"
+      aria-label="Lọc trạng thái cảnh báo"
+      className="rounded-full bg-white p-1 shadow-[0_2px_10px_-6px_rgba(15,63,53,0.4)]"
+      onValueChange={(value) => {
+        // Radix trả chuỗi rỗng khi bấm lại mục đang chọn; giữ nguyên bộ lọc thay vì bỏ trắng.
+        if (!value) return
+        // Giữ bộ lọc trên URL để người dùng chia sẻ hoặc tải lại vẫn thấy đúng màn hình
+        setParams(value === "ALL" ? {} : { status: value }, { replace: true })
+      }}
+    >
+      {OWNER_ALERT_FILTERS.map((item) => (
+        <ToggleGroupItem
+          key={item.value}
+          value={item.value}
+          className="gap-2 rounded-full! border-0 px-4 text-sm text-slate-500 data-[state=on]:bg-emerald-50 data-[state=on]:font-semibold data-[state=on]:text-emerald-800"
+        >
+          {item.label}
+          {item.value === "OPEN" && grouped.open.length ? (
+            <span className="rounded-full bg-amber-100 px-1.5 text-xs font-semibold text-amber-700 tabular-nums">
+              {grouped.open.length}
+            </span>
+          ) : null}
+        </ToggleGroupItem>
+      ))}
+    </ToggleGroup>
+  )
 
   return (
     <div className="space-y-5">

@@ -183,6 +183,18 @@ export const SCADA_SYSTEM_CARD = {
  * Ảnh nền chỉ vẽ được hai mức 60% và 100%, nên cột này là chỗ duy nhất
  * thể hiện mực nước liên tục theo đúng số đo.
  */
+/**
+ * Vùng bọt khí của máy sủi oxy trong bể cá.
+ *
+ * Bọt chỉ nổi lên khi máy sủi báo đang chạy, nên đây là chỗ duy nhất trên sơ đồ
+ * cho biết có oxy đang được bơm vào nước hay không — tranh nền vẽ bọt cố định,
+ * nhìn vào không phân biệt được máy đang bật hay đã tắt.
+ */
+export const SCADA_AERATOR = {
+  code: "AERATION_PUMP",
+  box: { x: 30.54, y: 69.79, w: 10.32, h: 18.13 },
+} as const
+
 export const SCADA_LEVEL_GAUGE = {
   code: "WATER_LEVELW2",
   box: { x: 54.33, y: 70.17, w: 2.17, h: 19.15 },
