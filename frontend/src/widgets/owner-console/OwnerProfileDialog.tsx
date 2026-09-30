@@ -10,6 +10,7 @@ import { Avatar, AvatarFallback } from "@/shared/ui/avatar"
 import { Button } from "@/shared/ui/button"
 import { Input } from "@/shared/ui/input"
 import { Label } from "@/shared/ui/label"
+import { isGmailAddress, isVietnameseMobilePhone, normalizeVietnameseMobilePhone } from "@/shared/lib/contact-validation"
 
 const TEAL = "bg-[#0d5c4d] hover:bg-[#0b4d40] text-white"
 
@@ -17,11 +18,12 @@ function initialsOf(fullName: string | undefined) {
   return (fullName ?? "ND").split(" ").filter(Boolean).slice(-2).map((part) => part[0]).join("").toUpperCase()
 }
 
-function Field({ id, label, value, type = "text", onChange }: { id: string; label: string; value: string; type?: string; onChange: (value: string) => void }) {
+function Field({ id, label, value, type = "text", error, onChange }: { id: string; label: string; value: string; type?: string; error?: string; onChange: (value: string) => void }) {
   return (
     <div className="space-y-1">
       <Label htmlFor={id} className="text-xs font-medium text-slate-600">{label}</Label>
-      <Input id={id} className="h-10 rounded-xl" type={type} value={value} onChange={(event) => onChange(event.target.value)} required />
+      <Input id={id} className="h-10 rounded-xl" type={type} aria-invalid={!!error} value={value} onChange={(event) => onChange(event.target.value)} required />
+      {error ? <p role="alert" className="text-xs text-destructive">{error}</p> : null}
     </div>
   )
 }
@@ -77,8 +79,10 @@ export function OwnerProfileDialog({
     }
   }, [open, user])
 
+  const gmailValid = isGmailAddress(email)
+  const phoneValid = isVietnameseMobilePhone(phoneNumber)
   const profile = useMutation({
-    mutationFn: () => updateProfile({ full_name: fullName.trim(), email: email.trim(), phone_number: phoneNumber.trim(), address: address.trim() }),
+    mutationFn: () => updateProfile({ full_name: fullName.trim(), email: email.trim().toLowerCase(), phone_number: normalizeVietnameseMobilePhone(phoneNumber), address: address.trim() }),
     onSuccess: async () => { await onSaved(); setSaved(true) },
   })
 
@@ -95,8 +99,8 @@ export function OwnerProfileDialog({
           </div>
           <form className="space-y-3 px-6 pb-6" onSubmit={(event) => { event.preventDefault(); profile.mutate() }}>
             <Field id="owner-profile-name" label="Họ tên" value={fullName} onChange={setFullName} />
-            <Field id="owner-profile-email" label="Email" type="email" value={email} onChange={setEmail} />
-            <Field id="owner-profile-phone" label="Số điện thoại" type="tel" value={phoneNumber} onChange={setPhoneNumber} />
+            <Field id="owner-profile-email" label="Email Gmail" type="email" value={email} error={email && !gmailValid ? "Email phải sử dụng địa chỉ @gmail.com" : undefined} onChange={setEmail} />
+            <Field id="owner-profile-phone" label="Số điện thoại Việt Nam" type="tel" value={phoneNumber} error={phoneNumber && !phoneValid ? "Số điện thoại phải bắt đầu bằng 03/05/07/08/09 hoặc +84 tương ứng" : undefined} onChange={setPhoneNumber} />
             <Field id="owner-profile-address" label="Địa chỉ" value={address} onChange={setAddress} />
             {saved ? <p role="status" className="text-sm text-emerald-700">Đã lưu thay đổi.</p> : null}
             {profile.isError ? <p role="alert" className="text-sm text-destructive">{errorMessage(profile.error)}</p> : null}
@@ -104,7 +108,7 @@ export function OwnerProfileDialog({
               <Button type="button" variant="ghost" className="rounded-xl text-[#0d5c4d] hover:bg-[#0d5c4d]/10 hover:text-[#0d5c4d]" onClick={() => setPasswordOpen(true)}>
                 <KeyRound className="size-4" />Đổi mật khẩu
               </Button>
-              <Button type="submit" className={`rounded-xl ${TEAL}`} disabled={profile.isPending}>
+              <Button type="submit" className={`rounded-xl ${TEAL}`} disabled={profile.isPending || !gmailValid || !phoneValid}>
                 <Save className="size-4" />Lưu thay đổi
               </Button>
             </div>

@@ -8,7 +8,7 @@ from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator, mo
 from app.core.enums import UserRole, UserStatus
 
 USERNAME_PATTERN = re.compile(r"^[A-Za-z0-9._-]+$")
-PHONE_PATTERN = re.compile(r"^\+?[0-9]{8,15}$")
+PHONE_PATTERN = re.compile(r"^(?:0|\+84)[35789][0-9]{8}$")
 REQUIRED_USER_PROFILE_FIELDS = ("full_name", "email", "phone_number", "address")
 
 
@@ -24,7 +24,23 @@ def normalize_required_user_text(value: object) -> object:
 
 def normalize_required_user_email(value: object) -> object:
     value = normalize_required_user_text(value)
-    return value.lower() if isinstance(value, str) else value
+    if not isinstance(value, str):
+        return value
+    normalized = value.lower()
+    if normalized.rsplit("@", 1)[-1] != "gmail.com":
+        raise ValueError("Email phải sử dụng địa chỉ Gmail (@gmail.com)")
+    return normalized
+
+
+def normalize_vietnamese_phone_number(value: str) -> str:
+    if not PHONE_PATTERN.fullmatch(value):
+        raise ValueError(
+            "Số điện thoại phải là số di động Việt Nam 10 số, bắt đầu bằng "
+            "03/05/07/08/09 hoặc +84 tương ứng"
+        )
+    if value.startswith("+84"):
+        return f"0{value[3:]}"
+    return value
 
 
 def missing_required_user_profile_fields(values: Mapping[str, object]) -> list[str]:
@@ -61,9 +77,7 @@ class UserCreate(UserBase):
     @field_validator("phone_number")
     @classmethod
     def validate_phone_number(cls, value: str) -> str:
-        if not PHONE_PATTERN.fullmatch(value):
-            raise ValueError("Số điện thoại chỉ gồm 8–15 chữ số và có thể bắt đầu bằng dấu +")
-        return value
+        return normalize_vietnamese_phone_number(value)
 
 
 class AdminUserCreate(BaseModel):
@@ -98,9 +112,7 @@ class AdminUserCreate(BaseModel):
     @field_validator("phone_number")
     @classmethod
     def validate_phone_number(cls, value: str) -> str:
-        if not PHONE_PATTERN.fullmatch(value):
-            raise ValueError("Số điện thoại chỉ gồm 8–15 chữ số và có thể bắt đầu bằng dấu +")
-        return value
+        return normalize_vietnamese_phone_number(value)
 
     @model_validator(mode="after")
     def validate_account(self) -> "AdminUserCreate":
@@ -132,9 +144,7 @@ class UserUpdate(BaseModel):
     @field_validator("phone_number")
     @classmethod
     def validate_phone_number(cls, value: str | None) -> str | None:
-        if value is not None and not PHONE_PATTERN.fullmatch(value):
-            raise ValueError("Số điện thoại chỉ gồm 8–15 chữ số và có thể bắt đầu bằng dấu +")
-        return value
+        return normalize_vietnamese_phone_number(value) if value is not None else None
 
 
 class AccountLifecycleRequest(BaseModel):
@@ -160,9 +170,7 @@ class UserSelfUpdate(BaseModel):
     @field_validator("phone_number")
     @classmethod
     def validate_phone_number(cls, value: str | None) -> str | None:
-        if value is not None and not PHONE_PATTERN.fullmatch(value):
-            raise ValueError("Số điện thoại chỉ gồm 8–15 chữ số và có thể bắt đầu bằng dấu +")
-        return value
+        return normalize_vietnamese_phone_number(value) if value is not None else None
 
 
 class UserRead(UserBase):

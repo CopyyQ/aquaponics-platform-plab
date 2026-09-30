@@ -18,6 +18,7 @@ import { StatusBadge } from "@/shared/ui/status-badge"
 import { Switch } from "@/shared/ui/switch"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/shared/ui/table"
 import { toast } from "sonner"
+import { isGmailAddress, isVietnameseMobilePhone, normalizeVietnameseMobilePhone } from "@/shared/lib/contact-validation"
 
 // Hieu ung chi ap dung cho cac hop thoai o man hinh nay.
 const userDialogMotion = "duration-200 ease-out data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:zoom-in-95 data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:zoom-out-95 motion-reduce:animate-none"
@@ -55,16 +56,16 @@ function CreateUserDialog({ open, onOpenChange, roles, onCreated }: { open: bool
   const [confirm, setConfirm] = useState("")
   const [mustChange, setMustChange] = useState(true)
   const mutation = useMutation({
-    mutationFn: () => createManagedUser({ username: username.trim(), full_name: fullName.trim(), email: email.trim(), phone_number: phone.trim(), address: address.trim(), role_id: roleId ? Number(roleId) : null, password, confirm_password: confirm, must_change_password: mustChange }),
+    mutationFn: () => createManagedUser({ username: username.trim(), full_name: fullName.trim(), email: email.trim().toLowerCase(), phone_number: normalizeVietnameseMobilePhone(phone), address: address.trim(), role_id: roleId ? Number(roleId) : null, password, confirm_password: confirm, must_change_password: mustChange }),
     onSuccess: async () => { await onCreated(); toast.success("Đã tạo tài khoản"); onOpenChange(false) },
     onError: (error) => toast.error(errorMessage(error)),
   })
-  const valid = username.trim() && fullName.trim() && email.trim() && phone.trim() && password.length >= 8 && password === confirm
+  const valid = username.trim() && fullName.trim() && isGmailAddress(email) && isVietnameseMobilePhone(phone) && password.length >= 8 && password === confirm
   return <Dialog open={open} onOpenChange={onOpenChange}><DialogContent className={`sm:max-w-2xl ${userDialogMotion}`} overlayClassName={userOverlayMotion}><DialogHeader><DialogTitle>Tạo tài khoản</DialogTitle><DialogDescription>Tạo người dùng mới và gán vai trò.</DialogDescription></DialogHeader><div className="grid gap-4 sm:grid-cols-2">
     <Field id="new-username" label="Tên đăng nhập" value={username} onChange={setUsername} />
     <Field id="new-fullname" label="Họ tên" value={fullName} onChange={setFullName} />
-    <Field id="new-email" label="Email" type="email" value={email} onChange={setEmail} />
-    <Field id="new-phone" label="Số điện thoại" value={phone} onChange={setPhone} />
+    <Field id="new-email" label="Email Gmail" type="email" value={email} onChange={setEmail} />
+    <Field id="new-phone" label="Số điện thoại Việt Nam" type="tel" value={phone} onChange={setPhone} />
     <Field id="new-address" label="Địa chỉ" value={address} onChange={setAddress} required={false} />
     <div><Label>Vai trò</Label><Select value={roleId} onValueChange={setRoleId}><SelectTrigger className="mt-1"><SelectValue placeholder="Chọn vai trò" /></SelectTrigger><SelectContent>{roles.map((role) => <SelectItem value={String(role.id)} key={role.id}>{role.name} ({role.code})</SelectItem>)}</SelectContent></Select></div>
     <Field id="new-password" label="Mật khẩu" type="password" value={password} onChange={setPassword} />

@@ -69,8 +69,8 @@ export function CreateAccountDialog() {
           <div className="grid gap-4 sm:grid-cols-2">
             {field("username", "Tên đăng nhập", "text", "username")}
             {field("full_name", "Họ và tên", "text", "name")}
-            {field("email", "Email", "email", "email")}
-            {field("phone_number", "Số điện thoại", "tel", "tel")}
+            {field("email", "Email Gmail", "email", "email")}
+            {field("phone_number", "Số điện thoại Việt Nam", "tel", "tel")}
             <div className="sm:col-span-2">{field("address", "Địa chỉ", "text", "street-address")}</div>
             <div className="flex flex-col gap-2">
               <Label htmlFor="create-account-role">Vai trò</Label>

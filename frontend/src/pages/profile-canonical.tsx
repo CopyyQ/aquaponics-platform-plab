@@ -13,6 +13,7 @@ import { Input } from "@/shared/ui/input"
 import { Label } from "@/shared/ui/label"
 import { Textarea } from "@/shared/ui/textarea"
 import { cn } from "@/shared/lib/utils"
+import { isGmailAddress, isVietnameseMobilePhone, normalizeVietnameseMobilePhone } from "@/shared/lib/contact-validation"
 
 export function ProfilePage() {
   const { session, reload, logout } = useAuth()
@@ -28,7 +29,9 @@ export function ProfilePage() {
   const [saved, setSaved] = useState(false)
   const operator = isOperatorConsole(session?.permissions, readAccountRole())
   useEffect(() => { if (session?.user) { setFullName(session.user.full_name); setEmail(session.user.email); setPhoneNumber(session.user.phone_number); setAddress(session.user.address ?? "") } }, [session])
-  const profile = useMutation({ mutationFn: () => updateProfile({ full_name: fullName.trim(), email: email.trim(), phone_number: phoneNumber.trim(), address: address.trim() }), onSuccess: async () => { await reload(); setSaved(true) } })
+  const profile = useMutation({ mutationFn: () => updateProfile({ full_name: fullName.trim(), email: email.trim().toLowerCase(), phone_number: normalizeVietnameseMobilePhone(phoneNumber), address: address.trim() }), onSuccess: async () => { await reload(); setSaved(true) } })
+  const gmailValid = isGmailAddress(email)
+  const phoneValid = isVietnameseMobilePhone(phoneNumber)
   const passwordMismatch = confirmPassword.length > 0 && newPassword !== confirmPassword
   const password = useMutation({ mutationFn: () => changePassword({ current_password: currentPassword, new_password: newPassword, confirm_password: confirmPassword }), onSuccess: async () => { await logout(); navigate("/login?password=changed", { replace: true }) } })
   const forced = session?.user.must_change_password || params.get("change-password") === "required"
@@ -50,13 +53,13 @@ export function ProfilePage() {
           <p className="mb-4 text-sm text-muted-foreground">@{session?.user.username}</p>
           <form className="space-y-3" onSubmit={(event) => { event.preventDefault(); profile.mutate() }}>
             <TextField id="profile-name" label="Họ tên" value={fullName} onChange={setFullName} />
-            <TextField id="profile-email" label="Email" value={email} type="email" onChange={setEmail} />
-            <TextField id="profile-phone" label="Số điện thoại" value={phoneNumber} type="tel" onChange={setPhoneNumber} />
+            <TextField id="profile-email" label="Email Gmail" value={email} type="email" error={email && !gmailValid ? "Email phải sử dụng địa chỉ @gmail.com" : undefined} onChange={setEmail} />
+            <TextField id="profile-phone" label="Số điện thoại Việt Nam" value={phoneNumber} type="tel" error={phoneNumber && !phoneValid ? "Số điện thoại phải bắt đầu bằng 03/05/07/08/09 hoặc +84 tương ứng" : undefined} onChange={setPhoneNumber} />
             <div>
               <Label htmlFor="profile-address">Địa chỉ</Label>
               <Textarea id="profile-address" className="mt-1" value={address} onChange={(event) => setAddress(event.target.value)} />
             </div>
-            <Button type="submit" disabled={profile.isPending}><Save />Lưu hồ sơ</Button>
+            <Button type="submit" disabled={profile.isPending || !gmailValid || !phoneValid}><Save />Lưu hồ sơ</Button>
             {saved ? <p role="status" className="text-sm text-emerald-700">Đã lưu hồ sơ.</p> : null}
             {profile.isError ? <p role="alert" className="text-sm text-destructive">{errorMessage(profile.error)}</p> : null}
           </form>
@@ -84,6 +87,6 @@ export function ProfilePage() {
   )
 }
 
-function TextField({ id, label, value, type = "text", minLength, onChange }: { id: string; label: string; value: string; type?: string; minLength?: number; onChange: (value: string) => void }) {
-  return <div><Label htmlFor={id}>{label}</Label><Input id={id} className="mt-1" type={type} minLength={minLength} value={value} onChange={(event) => onChange(event.target.value)} required /></div>
+function TextField({ id, label, value, type = "text", minLength, error, onChange }: { id: string; label: string; value: string; type?: string; minLength?: number; error?: string; onChange: (value: string) => void }) {
+  return <div><Label htmlFor={id}>{label}</Label><Input id={id} className="mt-1" type={type} minLength={minLength} aria-invalid={!!error} value={value} onChange={(event) => onChange(event.target.value)} required />{error ? <p role="alert" className="mt-1 text-xs text-destructive">{error}</p> : null}</div>
 }

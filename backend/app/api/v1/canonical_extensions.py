@@ -44,11 +44,11 @@ from app.schemas.notifications import (
     TestMessageResult,
 )
 from app.schemas.user import (
-    PHONE_PATTERN,
     REQUIRED_USER_PROFILE_FIELDS,
     missing_required_user_profile_fields,
     normalize_required_user_email,
     normalize_required_user_text,
+    normalize_vietnamese_phone_number,
 )
 from app.services.access_service import require_project_access
 from app.services.aquaponics_system_creation_service import (
@@ -165,9 +165,7 @@ class ManagedUserCreate(BaseModel):
     @field_validator("phone_number")
     @classmethod
     def validate_phone_number(cls, value: str) -> str:
-        if not PHONE_PATTERN.fullmatch(value):
-            raise ValueError("Số điện thoại chỉ gồm 8–15 chữ số và có thể bắt đầu bằng dấu +")
-        return value
+        return normalize_vietnamese_phone_number(value)
 
 
 class ManagedUserUpdate(BaseModel):
@@ -191,9 +189,7 @@ class ManagedUserUpdate(BaseModel):
     @field_validator("phone_number")
     @classmethod
     def validate_phone_number(cls, value: str | None) -> str | None:
-        if value is not None and not PHONE_PATTERN.fullmatch(value):
-            raise ValueError("Số điện thoại chỉ gồm 8–15 chữ số và có thể bắt đầu bằng dấu +")
-        return value
+        return normalize_vietnamese_phone_number(value) if value is not None else None
 
 
 class ManagedUserRead(BaseModel):

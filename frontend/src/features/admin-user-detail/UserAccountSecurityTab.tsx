@@ -1,5 +1,7 @@
 import { useState } from "react"
 import { useForm } from "react-hook-form"
+import { zodResolver } from "@hookform/resolvers/zod"
+import { z } from "zod"
 import { useMutation, useQueryClient } from "@tanstack/react-query"
 import { toast } from "sonner"
 import type { AdminUserDetail, UserRole } from "@/entities/user/model/types"
@@ -7,6 +9,7 @@ import { userApi } from "@/entities/user/api/user-api"
 import { useProtectedQueryScope } from "@/features/auth/model/use-protected-query-scope"
 import { invalidateQueries } from "@/shared/api/query-invalidation"
 import { queryKeys } from "@/shared/api/query-keys"
+import { gmailSchema, vietnameseMobileSchema } from "@/shared/lib/contact-validation"
 import { Button } from "@/shared/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/shared/ui/card"
 import { Input } from "@/shared/ui/input"
@@ -14,17 +17,19 @@ import { Label } from "@/shared/ui/label"
 import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from "@/shared/ui/select"
 import { AdminSetPasswordDialog } from "@/features/manage-accounts/components/AdminSetPasswordDialog"
 
-interface AccountValues {
-  full_name: string
-  email: string
-  phone_number: string
-  system_role: UserRole
-}
+const accountSchema = z.object({
+  full_name: z.string().trim().min(2, "Họ và tên tối thiểu 2 ký tự"),
+  email: gmailSchema,
+  phone_number: vietnameseMobileSchema,
+  system_role: z.enum(["ADMIN", "OWNER", "VIEWER"]),
+})
+type AccountValues = z.infer<typeof accountSchema>
 
 export function UserAccountSecurityTab({ user }: { user: AdminUserDetail }) {
   const queryClient = useQueryClient()
   const { queryScope } = useProtectedQueryScope()
-  const { register, handleSubmit, setValue } = useForm<AccountValues>({
+  const { register, handleSubmit, setValue, formState } = useForm<AccountValues>({
+    resolver: zodResolver(accountSchema),
     defaultValues: {
       full_name: user.full_name, email: user.email, phone_number: user.phone_number,
       system_role: user.system_role,
@@ -47,8 +52,8 @@ export function UserAccountSecurityTab({ user }: { user: AdminUserDetail }) {
           <form className="flex flex-col gap-4" onSubmit={handleSubmit((values) => update.mutate(values))}>
             <div className="grid gap-4 sm:grid-cols-2">
               <div className="flex flex-col gap-2"><Label htmlFor="admin-full-name">Họ tên</Label><Input id="admin-full-name" {...register("full_name", { required: true })} /></div>
-              <div className="flex flex-col gap-2"><Label htmlFor="admin-email">Email</Label><Input id="admin-email" type="email" {...register("email", { required: true })} /></div>
-              <div className="flex flex-col gap-2"><Label htmlFor="admin-phone">Số điện thoại</Label><Input id="admin-phone" {...register("phone_number", { required: true })} /></div>
+              <div className="flex flex-col gap-2"><Label htmlFor="admin-email">Email Gmail</Label><Input id="admin-email" type="email" aria-invalid={!!formState.errors.email} {...register("email")} />{formState.errors.email ? <p className="text-xs text-destructive">{formState.errors.email.message}</p> : null}</div>
+              <div className="flex flex-col gap-2"><Label htmlFor="admin-phone">Số điện thoại Việt Nam</Label><Input id="admin-phone" type="tel" aria-invalid={!!formState.errors.phone_number} {...register("phone_number")} />{formState.errors.phone_number ? <p className="text-xs text-destructive">{formState.errors.phone_number.message}</p> : null}</div>
               <div className="flex flex-col gap-2"><Label>Vai trò</Label><Select defaultValue={user.system_role} onValueChange={(value) => setValue("system_role", value as UserRole)}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectGroup><SelectItem value="ADMIN">Admin</SelectItem><SelectItem value="OWNER">Owner</SelectItem><SelectItem value="VIEWER">Viewer</SelectItem></SelectGroup></SelectContent></Select></div>
             </div>
             <Button type="submit" className="self-start" disabled={update.isPending}>Lưu thay đổi</Button>
