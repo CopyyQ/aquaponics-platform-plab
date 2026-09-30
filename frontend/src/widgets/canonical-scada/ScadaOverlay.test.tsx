@@ -125,11 +125,11 @@ describe("ScadaOverlay", () => {
   }
 
   it("grows cards placed above equipment upward so they never cover the drawing", () => {
-    for (const id of ["biofilter", "water-supply"]) {
-      const { box } = card(id)
-      expect(card(id).anchor).toBe("bottom")
-      expect(markup).toContain(`bottom:${100 - (box.y + box.h)}%`)
-    }
+    // Đọc thẳng từ bố cục: thẻ nào neo đáy là do bố cục quyết, bài kiểm thử chỉ canh
+    // rằng neo đáy thì phải tính ra đúng mép dưới, khỏi vỡ mỗi lần xếp lại thẻ.
+    const anchored = SCADA_CARDS.filter((item) => item.anchor === "bottom")
+    expect(anchored.length).toBeGreaterThan(0)
+    for (const { box } of anchored) expect(markup).toContain(`bottom:${100 - (box.y + box.h)}%`)
   })
 
   it("still anchors cards drawn over their subject by the top edge", () => {

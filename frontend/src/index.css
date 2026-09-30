@@ -82,6 +82,26 @@
   --radius-xl: calc(var(--radius) + 4px);
 }
 
+/* Dòng nước trên sơ đồ SCADA: ống liền màu xanh, mũi tên trắng nhỏ trượt dọc bên trong.
+   Mũi tên bám đường bằng CSS motion path nên trình duyệt lo phần động, không cần JS. */
+@keyframes scada-flow-arrow {
+  from { offset-distance: 0%; }
+  to { offset-distance: 100%; }
+}
+
+/* Mọi mũi tên đều bám đường và quay theo hướng ống, kể cả khi đứng yên. */
+.scada-flow-arrow { offset-rotate: auto; }
+
+/* Chỉ mạch đang chảy mới thêm lớp này. Thiết bị tắt thì ống vẫn vẽ nguyên,
+   mũi tên chỉ dừng lại tại chỗ chứ không biến mất. */
+.scada-flow-arrow-run { animation: scada-flow-arrow 4s linear infinite; }
+
+/* Hoạt hình chạy vô hạn trên màn hình mở cả ngày. Ai đã xin giảm chuyển động thì
+   mũi tên đứng yên tại chỗ đã rải đều — vẫn đọc được chiều nước, chỉ là không trôi. */
+@media (prefers-reduced-motion: reduce) {
+  .scada-flow-arrow-run { animation: none; }
+}
+
 * { @apply border-border; }
 body { @apply bg-background text-foreground antialiased; }
 button, a { @apply outline-none; }

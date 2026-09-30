@@ -105,14 +105,17 @@ export const SCADA_CARDS: ScadaCard[] = [
     items: ["WATER_LEVEL", "TDS", "NO3", "NH3"],
   },
   {
-    id: "water-supply",
-    title: "Van & bơm",
-    box: { x: 53.71, y: 12.66, w: 12.82, h: 8.3 },
-    anchor: "bottom",
+    id: "biofilter-pump",
+    title: "Bơm",
+    // Tâm khung đặt trùng tâm bồn chứa (61,17% — lấy từ điểm cái bơm vẽ trong bồn).
+    // Thẻ canh giữa nên tự co theo chữ rồi dịch lại nửa chính nó, không còn lệch trái
+    // như khi neo mép trái với một khung rộng hơn nội dung.
+    box: { x: 54.76, y: 12.66, w: 12.82, h: 8.3 },
+    centered: true,
     icon: "waves",
-    // Van cấp nước đã có thẻ riêng đặt ngay cạnh cái van vẽ trên tranh, nên bỏ khỏi đây:
-    // cùng một cơ cấu hiện hai chỗ thì người xem không biết đang nhìn cái nào.
-    items: ["BIOFILTER_PUMP", "FILTER_DRAIN_VALVE"],
+    // Thẻ này thu về đúng cái bơm đặt dưới nó trong tranh. Van cấp nước đã có thẻ riêng
+    // cạnh cái van thật, còn van xả đáy thì chưa được đánh dấu vị trí nên tạm chưa hiện.
+    items: ["BIOFILTER_PUMP"],
   },
   {
     id: "fish-tank",
@@ -186,6 +189,6 @@ export const SCADA_LEVEL_GAUGE = {
 } as const
 
 // Chưa hiển thị: AIR_TEMPERATURE, AIR_HUMIDITY, LIGHT_INTENSITY,
-// GROW_LIGHT, WARNING_LIGHT, WARNING_BUZZER.
+// FILTER_DRAIN_VALVE, GROW_LIGHT, WARNING_LIGHT, WARNING_BUZZER.
 // Những chỉ số này chưa được đánh dấu vị trí trên tranh. Thêm vào items của một thẻ
 // hoặc tạo thẻ mới cho chúng khi đã có toạ độ.
