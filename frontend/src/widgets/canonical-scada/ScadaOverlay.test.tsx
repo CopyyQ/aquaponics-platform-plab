@@ -1,12 +1,15 @@
 import { renderToStaticMarkup } from "react-dom/server"
 import { MemoryRouter } from "react-router-dom"
 import { describe, expect, it } from "vitest"
+import { SCADA_CARDS, SCADA_IMAGE_ASPECT, SCADA_LEVEL_GAUGE } from "@/entities/scada/model/scada-cards"
 import { ScadaOverlay } from "./ScadaOverlay"
 
 type OverlaySource = Parameters<typeof ScadaOverlay>[0]["runtime"]
 
-function sensor(id: string, code: string, unit: string) {
-  return { id, code, name: code, sensor_model_code: code, unit, device_id: "dev-1", enabled: true }
+// name đặt như tên thật trong cơ sở dữ liệu, không lấy mã làm tên: hộp chi tiết lấy
+// thẳng tên này nên dữ liệu giả dùng mã sẽ che mất lỗi rò mã ra màn hình.
+function sensor(id: string, code: string, unit: string, name: string) {
+  return { id, code, name, sensor_model_code: code, unit, device_id: "dev-1", enabled: true }
 }
 function value(id: string, v: number) {
   return { id, value: v, recorded_at: "2026-09-25T04:40:00Z", received_at: "2026-09-25T04:40:01Z", freshness: "FRESH", quality: "VALID", quality_reason: null }
@@ -26,12 +29,12 @@ function source(): OverlaySource {
     inventory: {
       devices: [{ id: "dev-1", code: "D1", name: "Thiết bị", device_template_id: 1, template_code: "T", enabled: true, connectivity: "ONLINE", last_seen_at: null }],
       sensors: [
-        sensor("s-level", "WATER_LEVELW2", "%"),
-        sensor("s-temp", "WATER_TEMPERATURE", "°C"),
-        sensor("s-ph", "PH", "pH"),
-        sensor("s-air", "AIR_TEMPERATURE", "°C"),
-        sensor("s-volt", "VOLTAGE", "V"),
-        sensor("s-curr", "CURRENT", "A"),
+        sensor("s-level", "WATER_LEVELW2", "%", "Cảm biến mực nước bể cá"),
+        sensor("s-temp", "WATER_TEMPERATURE", "°C", "Cảm biến nhiệt độ nước"),
+        sensor("s-ph", "PH", "pH", "Cảm biến pH"),
+        sensor("s-air", "AIR_TEMPERATURE", "°C", "Cảm biến nhiệt độ không khí"),
+        sensor("s-volt", "VOLTAGE", "V", "Cảm biến điện áp"),
+        sensor("s-curr", "CURRENT", "A", "Cảm biến dòng điện"),
       ],
       actuators: [{ id: "a-pump", code: "FISH_TANK_PUMP", name: "Bơm bể cá", actuator_model_code: "FISH_TANK_PUMP", device_id: "dev-1", enabled: true }],
     },
@@ -106,18 +109,48 @@ describe("ScadaOverlay", () => {
   })
 
   it("caps the frame width by the available height so it fits one screen", () => {
-    expect(markup).toContain("calc((100dvh - 7.5rem) * 1.5)")
+    expect(markup).toContain(`calc((100dvh - 7.5rem) * ${SCADA_IMAGE_ASPECT})`)
   })
 
+  it("shapes the frame to the artwork so no letterbox shifts the calibrated coordinates", () => {
+    expect(markup).toContain(`aspect-ratio:${SCADA_IMAGE_ASPECT}`)
+  })
+
+  // Suy từ chính toạ độ đã hiệu chỉnh thay vì chép số vào đây: hiệu chỉnh lại
+  // ảnh nền là chuyện thường, mà cách neo thẻ thì không được đổi theo.
+  function card(id: string) {
+    const found = SCADA_CARDS.find((item) => item.id === id)
+    if (!found) throw new Error(`Thiếu thẻ ${id}`)
+    return found
+  }
+
   it("grows cards placed above equipment upward so they never cover the drawing", () => {
-    // Bể lọc: cạnh dưới khung là 7.18 + 9.25 = 16.43% nên thẻ phải neo bottom ở 83.57%
-    expect(markup).toContain("bottom:83.57%")
-    // Van & bơm: 6.87 + 8.3 = 15.17% -> 84.83%
-    expect(markup).toContain("bottom:84.83%")
+    for (const id of ["biofilter", "water-supply"]) {
+      const { box } = card(id)
+      expect(card(id).anchor).toBe("bottom")
+      expect(markup).toContain(`bottom:${100 - (box.y + box.h)}%`)
+    }
   })
 
   it("still anchors cards drawn over their subject by the top edge", () => {
-    expect(markup).toContain("top:66.72%")
+    expect(card("fish-tank").anchor).toBeUndefined()
+    expect(markup).toContain(`top:${card("fish-tank").box.y}%`)
+  })
+
+  it("pins a label to the middle of its box so wide text still points at the right part", () => {
+    // Nhãn ghim vào van: chữ rộng hơn khung nên phải dịch lại nửa chính nó,
+    // nếu không tâm chữ sẽ lệch sang phải khỏi cái van đã canh.
+    const { box } = card("fresh-water-valve")
+    expect(card("fresh-water-valve").centered).toBe(true)
+    expect(markup).toContain(`left:${box.x + box.w / 2}%`)
+    expect(markup).toContain(`top:${box.y + box.h / 2}%`)
+    expect(markup).toContain("translate(-50%, -50%)")
+  })
+
+  it("keeps a pinned valve label free of its reading until the card is opened", () => {
+    const face = markup.slice(markup.indexOf("Van cấp nước"))
+    expect(face.slice(0, 400)).not.toContain("TẮT")
+    expect(face.slice(0, 400)).not.toContain("chỉ số")
   })
 
   it("shows only the leading metrics on the card face and hides the rest behind a click", () => {
@@ -138,7 +171,15 @@ describe("ScadaOverlay", () => {
     expect(render(withIssue())).toContain("bg-sky-500")
     // Tình trạng báo bằng chấm riêng đứng sau tên thẻ
     expect(markup).toContain("bg-emerald-500")
-    expect(render(withIssue())).toContain("bg-rose-500")
+    // Mức nghiêm trọng đổi hẳn sang tam giác cảnh báo nên không còn chấm đỏ
+    expect(render(withIssue())).toContain("lucide-triangle-alert")
+    expect(render(withIssue())).not.toContain("bg-rose-500")
+  })
+
+  it("keeps a round dot for every severity below critical", () => {
+    // Chỉ mức nghiêm trọng mới đổi hình; mức nhẹ hơn vẫn là chấm tròn
+    expect(markup).not.toContain("lucide-triangle-alert")
+    expect(markup).toContain("rounded-full")
   })
 
   it("draws no connector lines between cards and equipment", () => {
@@ -212,7 +253,8 @@ describe("ScadaOverlay", () => {
   it("keeps the gauge tube exactly on the calibrated box beside the tank", () => {
     // Khung đúng toạ độ đã hiệu chỉnh: cao bằng bể, sát cạnh phải.
     // Nhãn và vạch chia nằm ngoài ống nên không nới khung này ra.
-    expect(markup).toContain("left:54.23%;top:67.49%;width:2.22%;height:20.78%")
+    const { x, y, w, h } = SCADA_LEVEL_GAUGE.box
+    expect(markup).toContain(`left:${x}%;top:${y}%;width:${w}%;height:${h}%`)
     // Giá trị bằng chữ vẫn đọc được cho trình đọc màn hình
     expect(markup).toContain("Mực nước bể cá: 100 %")
   })

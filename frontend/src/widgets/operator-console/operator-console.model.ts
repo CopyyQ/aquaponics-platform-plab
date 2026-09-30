@@ -1,10 +1,8 @@
 import type { Alert, AlertDeliveryRecipient, AquaponicsSystem, MonitoringActuator, MonitoringDevice, MonitoringLatest, MonitoringSensor } from "@/api/contracts"
+import { isOpenAlert, isResolvedAlert } from "@/entities/alert/model/alert-status"
 
 export type OperatorValueStatus = "NORMAL" | "ATTENTION" | "NO_DATA"
 export type OperatorSensorIcon = "ph" | "humidity" | "waterTemp" | "airTemp" | "level" | "light" | "tds" | "pressure" | "generic"
-
-const OPEN_ALERT_STATUSES = new Set(["PENDING", "OPEN", "ACKNOWLEDGED"])
-const RESOLVED_ALERT_STATUSES = new Set(["NORMALIZED", "RESOLVED"])
 
 export interface OperatorSensorCard {
   id: string
@@ -147,13 +145,7 @@ export function buildAlertBanner(sensors: OperatorSensorCard[], openAlertCount: 
   return `${openAlertCount} cảnh báo đang mở`
 }
 
-export function isOpenAlert(alert: Pick<Alert, "status">) {
-  return OPEN_ALERT_STATUSES.has(alert.status)
-}
-
-export function isResolvedAlert(alert: Pick<Alert, "status">) {
-  return RESOLVED_ALERT_STATUSES.has(alert.status)
-}
+export { isOpenAlert, isResolvedAlert }
 
 export function toAlertCard(alert: Alert): OperatorAlertCard {
   const valueText = alert.actual_value === null ? null : formatCompactNumber(alert.actual_value)

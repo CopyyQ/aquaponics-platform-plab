@@ -1,10 +1,12 @@
 import { useQuery } from "@tanstack/react-query"
 import { AlertTriangle, CheckCircle2 } from "lucide-react"
 import { useParams, useSearchParams } from "react-router-dom"
-import { listAlerts, queryKeys } from "@/api/resources"
+import { getMonitoringLatest, listAlerts, queryKeys } from "@/api/resources"
 import { errorMessage } from "@/api/client"
+import { deriveScadaIssues } from "@/entities/scada/model/monitoring-source"
 import { splitOperatorAlerts } from "@/widgets/operator-console/operator-console.model"
 import { OperatorAlertsBoard, OperatorAlertsSkeleton } from "@/widgets/operator-console/OperatorAlertsBoard"
+import { OperatorDeviceIssuesBoard } from "@/widgets/operator-console/OperatorDeviceIssuesBoard"
 import { EmptyState } from "@/shared/ui/empty-state"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/shared/ui/select"
 
@@ -31,6 +33,14 @@ const EMPTY_TEXT: Record<OwnerAlertFilter, string> = {
   RESOLVED: "Chưa có cảnh báo nào được xác nhận khắc phục.",
 }
 
+/**
+ * Sự cố thiết bị luôn là chuyện đang diễn ra, nên chỉ có nghĩa khi người dùng đang
+ * xem phần chưa xử lý. Lọc "Đã xử lý" là xem lịch sử, mà chúng thì không có lịch sử.
+ */
+export function showsDeviceIssues(filter: OwnerAlertFilter) {
+  return filter !== "RESOLVED"
+}
+
 export function OwnerAlertsPage() {
   const systemId = useParams().systemId ?? ""
   const [params, setParams] = useSearchParams()
@@ -39,6 +49,15 @@ export function OwnerAlertsPage() {
   const alerts = useQuery({
     queryKey: queryKeys.alerts(systemId),
     queryFn: () => listAlerts(systemId),
+    enabled: Boolean(systemId),
+    refetchInterval: 15_000,
+    staleTime: 10_000,
+    gcTime: 60_000,
+  })
+  // Dùng chung queryKey với khung giao diện và trang Tổng quan nên không tốn thêm lượt gọi.
+  const monitoring = useQuery({
+    queryKey: queryKeys.monitoringLatest(systemId),
+    queryFn: () => getMonitoringLatest(systemId),
     enabled: Boolean(systemId),
     refetchInterval: 15_000,
     staleTime: 10_000,
@@ -72,6 +91,9 @@ export function OwnerAlertsPage() {
   const grouped = splitOperatorAlerts(alerts.data ?? [])
   const open = filter === "RESOLVED" ? [] : grouped.open
   const resolved = filter === "OPEN" ? [] : grouped.resolved
+  // Truyền danh sách cảnh báo rỗng: phần vượt ngưỡng đã nằm trong bảng bên dưới rồi,
+  // ở đây chỉ cần những sự cố không có bản ghi nào đại diện.
+  const deviceIssues = monitoring.data && showsDeviceIssues(filter) ? deriveScadaIssues(monitoring.data, []) : []
 
   return (
     <div className="space-y-5">
@@ -80,11 +102,21 @@ export function OwnerAlertsPage() {
         {picker}
       </div>
 
+      <OperatorDeviceIssuesBoard issues={deviceIssues} />
+
       {open.length || resolved.length ? (
         <OperatorAlertsBoard open={open} resolved={resolved} />
       ) : (
         // Bảng dùng chung báo "chưa ghi nhận cảnh báo nào", sai ý khi đang lọc hẹp
-        <EmptyState icon={CheckCircle2} title="Không có cảnh báo" description={EMPTY_TEXT[filter]} />
+        <EmptyState
+          icon={CheckCircle2}
+          title="Không có cảnh báo"
+          description={
+            deviceIssues.length
+              ? "Không có cảnh báo ngưỡng nào. Sự cố thiết bị bên trên không được lưu thành bản ghi nên không xuất hiện trong danh sách này."
+              : EMPTY_TEXT[filter]
+          }
+        />
       )}
     </div>
   )

@@ -1,8 +1,8 @@
-import { AlertTriangle, Droplets, Fish, Waves } from "lucide-react"
+import { AlertTriangle, Droplet, Droplets, Fish, Sprout, Waves } from "lucide-react"
 import { Link } from "react-router-dom"
 import type { ScadaIssue, ScadaRuntimeResponse } from "@/api/contracts"
 import { TANK_FULL_THRESHOLD, deriveScadaScenarioSignals, resolveScadaScenarioImage } from "@/entities/scada/model/scenario-image"
-import { SCADA_CARDS, SCADA_LEVEL_GAUGE, SCADA_SYSTEM_CARD } from "@/entities/scada/model/scada-cards"
+import { SCADA_CARDS, SCADA_IMAGE_ASPECT, SCADA_LEVEL_GAUGE, SCADA_SYSTEM_CARD } from "@/entities/scada/model/scada-cards"
 import type { ScadaCard, ScadaCardIcon } from "@/entities/scada/model/scada-cards"
 import { readScadaMetrics, statusText } from "@/entities/scada/model/scada-readings"
 import type { ScadaReading } from "@/entities/scada/model/scada-readings"
@@ -13,7 +13,12 @@ import { formatRelative } from "@/shared/lib/date"
 import { cn } from "@/shared/lib/utils"
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from "@/shared/ui/dialog"
 
-type OverlaySource = ScenarioSource & Pick<ScadaRuntimeResponse, "aquaponics_system" | "issues">
+// Chỉ đòi `id` của hệ thống vì lớp phủ chỉ dùng nó để dẫn sang trang cảnh báo.
+// Nhờ vậy nguồn dựng từ monitoring/latest không phải bịa ra code/name/status.
+type OverlaySource = ScenarioSource &
+  Pick<ScadaRuntimeResponse, "issues"> & {
+    aquaponics_system: Pick<ScadaRuntimeResponse["aquaponics_system"], "id">
+  }
 
 /** Số chỉ số hiện trên mặt thẻ; phần còn lại xem trong hộp chi tiết. */
 const FACE_LIMIT = 2
@@ -72,10 +77,39 @@ function readingText(reading: ScadaReading) {
   return reading.text ?? statusText(reading.status)
 }
 
-function StatusDot({ health, className }: { health: ScadaHealth; className?: string }) {
+/**
+ * Đèn trạng thái: chấm tròn cho các mức nhẹ, tam giác cảnh báo cho mức nghiêm trọng.
+ *
+ * Mức nặng nhất không chỉ khác nhau ở màu: một chấm đỏ và một chấm xanh trông giống hệt
+ * nhau với người mù màu đỏ-lục, và ở cỡ 0,4em thì sắc độ gần như không phân biệt được.
+ * Đổi hẳn hình dạng khiến mức nghiêm trọng đọc được cả khi không nhận ra màu.
+ *
+ * `className` dành cho định vị, hai prop còn lại dành cho kích thước của từng hình,
+ * vì tam giác cần nhiều diện tích hơn chấm mới rõ nét.
+ */
+function StatusDot({
+  health,
+  className,
+  dotClassName,
+  iconClassName,
+}: {
+  health: ScadaHealth
+  className?: string
+  dotClassName?: string
+  iconClassName?: string
+}) {
+  if (health === "CRITICAL") {
+    return (
+      <AlertTriangle
+        className={cn("inline-block shrink-0 text-rose-600", className, iconClassName)}
+        strokeWidth={2.75}
+        aria-hidden="true"
+      />
+    )
+  }
   return (
     <span
-      className={cn("inline-block shrink-0 rounded-full ring-2", DOT[health], HALO[health], className)}
+      className={cn("inline-block shrink-0 rounded-full ring-2", DOT[health], HALO[health], className, dotClassName)}
       aria-hidden="true"
     />
   )
@@ -85,6 +119,8 @@ const ICONS: Record<ScadaCardIcon, typeof Droplets> = {
   droplets: Droplets,
   waves: Waves,
   fish: Fish,
+  droplet: Droplet,
+  sprout: Sprout,
 }
 
 /** Huy hiệu chỉ mang màu nhận diện, không kiêm nhiệm việc báo trạng thái. */
@@ -108,14 +144,16 @@ function CardHeading({ health, icon, children }: { health: ScadaHealth; icon?: S
       <IconBadge icon={icon} />
       {/* Tên thẻ luôn nằm một hàng; khung thẻ phải đủ rộng cho tên dài nhất. */}
       <span className="whitespace-nowrap">{children}</span>
-      <StatusDot health={health} className="size-[0.42em]" />
+      <StatusDot health={health} dotClassName="size-[0.42em]" iconClassName="size-[1em]" />
     </p>
   )
 }
 
 function CardFace({ card, readings, status }: { card: ScadaCard; readings: ScadaReading[]; status: ScadaCardStatus }) {
-  const shown = card.valueOnly ? readings : readings.slice(0, FACE_LIMIT)
-  const hidden = readings.length - shown.length
+  // hideValues: mặt thẻ chỉ còn tên; số liệu chờ trong hộp chi tiết.
+  const shown = card.hideValues ? [] : card.valueOnly ? readings : readings.slice(0, FACE_LIMIT)
+  // Thẻ giấu giá trị thì cũng không đếm "+N chỉ số": nó đang cố tình không nói con số nào.
+  const hidden = card.hideValues ? 0 : readings.length - shown.length
 
   return (
     <>
@@ -123,7 +161,12 @@ function CardFace({ card, readings, status }: { card: ScadaCard; readings: Scada
         <CardHeading health={status.health} icon={card.icon}>{card.title}</CardHeading>
       ) : (
         // Thẻ đồng hồ không có tiêu đề để gắn đèn, nên đặt chấm trạng thái ở góc.
-        <StatusDot health={status.health} className="absolute top-[0.35em] right-[0.35em] size-[0.36em]" />
+        <StatusDot
+          health={status.health}
+          className="absolute top-[0.35em] right-[0.35em]"
+          dotClassName="size-[0.36em]"
+          iconClassName="size-[0.8em]"
+        />
       )}
 
       {readings.length === 0 ? (
@@ -182,7 +225,7 @@ function CardDetail({ card, readings, status }: { card: ScadaCard; readings: Sca
     >
       <DialogHeader>
         <DialogTitle className="flex items-center gap-2.5 text-slate-900">
-          <StatusDot health={status.health} className="size-2.5" />
+          <StatusDot health={status.health} dotClassName="size-2.5" iconClassName="size-4" />
           {card.title ?? "Chi tiết chỉ số"}
         </DialogTitle>
         <DialogDescription asChild>
@@ -246,14 +289,23 @@ function OverlayCard({ card, source }: { card: ScadaCard; source: OverlaySource 
   const readings = readScadaMetrics(source, card.items)
   const status = resolveCardStatus(readings, source.issues)
 
-  const style = {
-    left: `${card.box.x}%`,
-    width: `${card.box.w}%`,
-    minHeight: `${card.box.h}%`,
-    ...(card.anchor === "bottom"
-      ? { bottom: `${100 - (card.box.y + card.box.h)}%` }
-      : { top: `${card.box.y}%` }),
-  }
+  // Thẻ canh giữa tự co theo nội dung rồi dịch lại nửa kích thước của chính nó,
+  // nên tâm chữ nằm đúng tâm khung dù chữ rộng hơn khung.
+  const style = card.centered
+    ? {
+        left: `${card.box.x + card.box.w / 2}%`,
+        top: `${card.box.y + card.box.h / 2}%`,
+        transform: "translate(-50%, -50%)",
+        width: "max-content",
+      }
+    : {
+        left: `${card.box.x}%`,
+        width: `${card.box.w}%`,
+        minHeight: `${card.box.h}%`,
+        ...(card.anchor === "bottom"
+          ? { bottom: `${100 - (card.box.y + card.box.h)}%` }
+          : { top: `${card.box.y}%` }),
+      }
 
   // Thẻ rỗng không có gì để xem thêm nên không mở hộp chi tiết.
   if (!readings.length) {
@@ -436,8 +488,11 @@ export function ScadaOverlay({ runtime, localHour }: { runtime: OverlaySource; l
       {/* Chiều rộng bị chặn bởi chiều cao khả dụng nên sơ đồ luôn gọn trong một màn hình.
           Dùng style nội tuyến vì Tailwind không sinh được giá trị tuỳ ý có dấu phẩy lồng trong min(). */}
       <div
-        className="@container relative mx-auto aspect-3/2 overflow-hidden rounded-2xl bg-slate-100 ring-1 ring-slate-900/5"
-        style={{ width: "min(100%, calc((100dvh - 7.5rem) * 1.5))" }}
+        className="@container relative mx-auto overflow-hidden rounded-2xl bg-slate-100 ring-1 ring-slate-900/5"
+        style={{
+          width: `min(100%, calc((100dvh - 7.5rem) * ${SCADA_IMAGE_ASPECT}))`,
+          aspectRatio: String(SCADA_IMAGE_ASPECT),
+        }}
       >
         {selection.assetUrl && selection.label ? (
           <img

@@ -74,7 +74,10 @@ function readOne(source: ScenarioSource, code: string): ScadaReading {
       code,
       kind,
       label,
-      fullLabel,
+      // Tên thật trong cơ sở dữ liệu thắng tên cứng: hộp chi tiết còn in kèm sự cố,
+      // mà sự cố gọi thiết bị theo tên trong DB — hai tên khác nhau trong cùng một
+      // khung hình khiến người xem tưởng đang nói về hai thiết bị.
+      fullLabel: actuator?.name ?? fullLabel,
       text: signal.status === "AVAILABLE" ? (signal.value ? "BẬT" : "TẮT") : null,
       value: null,
       status: signal.status,
@@ -107,17 +110,18 @@ function readOne(source: ScenarioSource, code: string): ScadaReading {
   const unvalidated = signal.status === "INVALID" ? unvalidatedValue(source, code) : null
   const value = signal.status === "AVAILABLE" ? signal.value : unvalidated
   const runtime = sensorRuntime(source, code)
+  const sensor = findSensor(source, code)
 
   return {
     code,
     kind,
     label,
-    fullLabel,
-    text: value !== null ? `${formatNumber(value)} ${findSensor(source, code)?.unit ?? ""}`.trim() : null,
+    fullLabel: sensor?.name ?? fullLabel,
+    text: value !== null ? `${formatNumber(value)} ${sensor?.unit ?? ""}`.trim() : null,
     value,
     status: unvalidated !== null ? "AVAILABLE" : signal.status,
     unvalidated: unvalidated !== null,
-    entityId: findSensor(source, code)?.id ?? null,
+    entityId: sensor?.id ?? null,
     recordedAt: runtime?.recorded_at ?? null,
   }
 }
