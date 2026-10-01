@@ -11,6 +11,8 @@ import { resolveCardStatus, resolveSystemStatus } from "@/entities/scada/model/s
 import type { ScadaCardStatus, ScadaHealth } from "@/entities/scada/model/scada-status"
 import { formatRelative } from "@/shared/lib/date"
 import { cn } from "@/shared/lib/utils"
+import { ScadaActuatorToggle } from "@/features/manage-actuator/components/ScadaActuatorToggle"
+import { resolveScadaActuatorTarget } from "@/features/manage-actuator/model/scada-actuator-target"
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from "@/shared/ui/dialog"
 import { ScadaAerator } from "./ScadaAerator"
 import { ScadaFlowLayer } from "./ScadaFlowLayer"
@@ -21,6 +23,20 @@ type OverlaySource = ScenarioSource &
   Pick<ScadaRuntimeResponse, "issues"> & {
     aquaponics_system: Pick<ScadaRuntimeResponse["aquaponics_system"], "id">
   }
+
+/**
+ * Quyền điều khiển truyền từ trang xuống. Chỉ dùng trong hộp chi tiết: mặt thẻ trên
+ * sơ đồ giữ nguyên chữ BẬT/TẮT tĩnh, còn công tắc nằm trong hộp chi tiết.
+ */
+type OverlayControl = { source: OverlaySource } | null
+
+/** Công tắc của một chỉ số cơ cấu; null khi không có quyền hoặc không tìm ra cơ cấu. */
+function ActuatorControl({ reading, control }: { reading: ScadaReading; control: OverlayControl }) {
+  if (!control || reading.kind !== "ACTUATOR") return null
+  const target = resolveScadaActuatorTarget(control.source, reading.code)
+  if (!target) return null
+  return <ScadaActuatorToggle systemId={control.source.aquaponics_system.id} target={target} />
+}
 
 /** Số chỉ số hiện trên mặt thẻ; phần còn lại xem trong hộp chi tiết. */
 const FACE_LIMIT = 2
@@ -214,7 +230,17 @@ function CardFace({ card, readings, status }: { card: ScadaCard; readings: Scada
   )
 }
 
-function CardDetail({ card, readings, status }: { card: ScadaCard; readings: ScadaReading[]; status: ScadaCardStatus }) {
+function CardDetail({
+  card,
+  readings,
+  status,
+  control,
+}: {
+  card: ScadaCard
+  readings: ScadaReading[]
+  status: ScadaCardStatus
+  control: OverlayControl
+}) {
   return (
     <DialogContent
       // Nền chỉ tối đi, không làm mờ: sơ đồ phía sau vẫn phải đọc được khi đối chiếu.
@@ -242,7 +268,7 @@ function CardDetail({ card, readings, status }: { card: ScadaCard; readings: Sca
 
       <ul className="divide-y divide-slate-100 overflow-hidden rounded-xl border border-slate-200">
         {readings.map((reading) => (
-          <li key={reading.code} className="flex items-start justify-between gap-4 px-3.5 py-2.5">
+          <li key={reading.code} className="flex items-center justify-between gap-4 px-3.5 py-2.5">
             <div className="min-w-0">
               <p className="text-sm font-medium text-slate-700">{reading.fullLabel}</p>
               {reading.recordedAt ? (
@@ -252,9 +278,13 @@ function CardDetail({ card, readings, status }: { card: ScadaCard; readings: Sca
                 <p className="mt-0.5 text-xs text-amber-700">Chưa khai báo miền hợp lệ nên giá trị chưa được đối chiếu.</p>
               ) : null}
             </div>
-            <span className={cn("shrink-0 text-sm font-bold tabular-nums", valueTone(reading))}>
-              {readingText(reading)}
-            </span>
+            {control && reading.kind === "ACTUATOR" && resolveScadaActuatorTarget(control.source, reading.code) ? (
+              <ActuatorControl reading={reading} control={control} />
+            ) : (
+              <span className={cn("shrink-0 text-sm font-bold tabular-nums", valueTone(reading))}>
+                {readingText(reading)}
+              </span>
+            )}
           </li>
         ))}
       </ul>
@@ -287,7 +317,7 @@ function CardDetail({ card, readings, status }: { card: ScadaCard; readings: Sca
 // Không nền, không bóng, không viền: chữ và biểu tượng nổi thẳng trên tranh.
 const SHELL = "absolute rounded-[0.6em] px-[0.35em] py-[0.25em] text-[1.4cqw] leading-tight"
 
-function OverlayCard({ card, source }: { card: ScadaCard; source: OverlaySource }) {
+function OverlayCard({ card, source, control }: { card: ScadaCard; source: OverlaySource; control: OverlayControl }) {
   const readings = readScadaMetrics(source, card.items)
   const status = resolveCardStatus(readings, source.issues)
 
@@ -336,7 +366,7 @@ function OverlayCard({ card, source }: { card: ScadaCard; source: OverlaySource 
           <CardFace card={card} readings={readings} status={status} />
         </button>
       </DialogTrigger>
-      <CardDetail card={card} readings={readings} status={status} />
+      <CardDetail card={card} readings={readings} status={status} control={control} />
     </Dialog>
   )
 }
@@ -480,7 +510,17 @@ function ReadingList({ readings, title }: { readings: ScadaReading[]; title: str
  * trong một màn hình, không phải cuộn. Chữ dùng đơn vị cqw nên co giãn cùng khung.
  * Dưới 1024px lớp phủ tắt và chỉ số rơi xuống danh sách, vì chữ khi đó quá nhỏ để đọc.
  */
-export function ScadaOverlay({ runtime, localHour }: { runtime: OverlaySource; localHour?: number }) {
+export function ScadaOverlay({
+  runtime,
+  localHour,
+  canCommand = false,
+}: {
+  runtime: OverlaySource
+  localHour?: number
+  /** Người xem có quyền gửi lệnh bật/tắt cơ cấu (actuators.commands.create). */
+  canCommand?: boolean
+}) {
+  const control: OverlayControl = canCommand ? { source: runtime } : null
   const hour = localHour ?? new Date(runtime.updated_at).getHours()
   const selection = resolveScadaScenarioImage(deriveScadaScenarioSignals(runtime, hour))
   const onImage = readScadaMetrics(runtime, SCADA_CARDS.flatMap((card) => card.items))
@@ -516,7 +556,7 @@ export function ScadaOverlay({ runtime, localHour }: { runtime: OverlaySource; l
           <div className="hidden lg:block" data-testid="scada-overlay">
             <LevelGauge source={runtime} />
             <SystemCard source={runtime} readings={onImage} />
-            {SCADA_CARDS.map((card) => <OverlayCard key={card.id} card={card} source={runtime} />)}
+            {SCADA_CARDS.map((card) => <OverlayCard key={card.id} card={card} source={runtime} control={control} />)}
           </div>
         ) : null}
       </div>

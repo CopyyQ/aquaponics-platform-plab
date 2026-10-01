@@ -3,6 +3,7 @@ import { useParams } from "react-router-dom"
 import { AlertTriangle } from "lucide-react"
 import { getMonitoringLatest, listAlerts, queryKeys } from "@/api/resources"
 import { errorMessage } from "@/api/client"
+import { useAuth } from "@/app/auth"
 import { toScadaSource } from "@/entities/scada/model/monitoring-source"
 import { OwnerOverviewBoard, OwnerOverviewSkeleton } from "@/widgets/owner-console/OwnerOverviewBoard"
 import { EmptyState } from "@/shared/ui/empty-state"
@@ -13,6 +14,7 @@ const POLL = { refetchInterval: 15_000, staleTime: 10_000, gcTime: 60_000 } as c
 
 export function OwnerOverviewPage() {
   const systemId = useParams().systemId ?? ""
+  const { can } = useAuth()
   const monitoring = useQuery({
     queryKey: queryKeys.monitoringLatest(systemId),
     queryFn: () => getMonitoringLatest(systemId),
@@ -34,5 +36,10 @@ export function OwnerOverviewPage() {
 
   // Cảnh báo chỉ bổ sung phần sự cố vượt ngưỡng; thiếu nó thì sơ đồ vẫn vẽ được
   // bằng dữ liệu đo, nên không chặn màn hình khi riêng truy vấn này hỏng.
-  return <OwnerOverviewBoard source={toScadaSource(monitoring.data, alerts.data ?? [])} />
+  return (
+    <OwnerOverviewBoard
+      source={toScadaSource(monitoring.data, alerts.data ?? [])}
+      canCommand={can("actuators.commands.create")}
+    />
+  )
 }

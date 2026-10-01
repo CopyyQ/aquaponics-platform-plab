@@ -5,8 +5,16 @@ import { Skeleton } from "@/shared/ui/skeleton"
 
 // Tổng quan OWNER: sơ đồ SCADA kèm chỉ số phủ lên ảnh. Cảnh báo nằm ở chuông trên header.
 // Lớp phủ đã tự có khung bo góc nên không bọc thêm Card, tránh hai khung lồng nhau.
-export function OwnerOverviewBoard({ source, localHour }: { source?: MonitoringScadaSource; localHour?: number }) {
-  return source ? <ScadaOverlay runtime={source} localHour={localHour} /> : null
+export function OwnerOverviewBoard({
+  source,
+  localHour,
+  canCommand = false,
+}: {
+  source?: MonitoringScadaSource
+  localHour?: number
+  canCommand?: boolean
+}) {
+  return source ? <ScadaOverlay runtime={source} localHour={localHour} canCommand={canCommand} /> : null
 }
 
 export function OwnerOverviewSkeleton() {
