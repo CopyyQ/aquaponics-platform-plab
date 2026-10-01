@@ -12,11 +12,12 @@ from sqlalchemy.orm import selectinload
 from app.api.deps import require_permission
 from app.core.enums import UserStatus
 from app.core.exceptions import InternalInvariantError
+from app.core.record_cache import cache_aside
 from app.db.session import get_db
 from app.models.actuator_model import ActuatorModel
 from app.models.device_template import DeviceTemplate, DeviceTemplateActuator, DeviceTemplateSensor
-from app.models.sensor_model import SensorModel
 from app.models.scenario_catalog import ScenarioCatalog, ScenarioCatalogItem
+from app.models.sensor_model import SensorModel
 from app.models.user import User
 from app.schemas.scenario_catalog import (
     ScenarioCatalogCreate,
@@ -24,6 +25,14 @@ from app.schemas.scenario_catalog import (
     ScenarioCatalogItemUpdate,
     ScenarioCatalogRead,
     ScenarioCatalogUpdate,
+)
+from app.services.catalog_record_cache import (
+    actuator_model_key,
+    device_template_key,
+    invalidate_actuator_model,
+    invalidate_device_template,
+    invalidate_scenario_catalog,
+    scenario_catalog_key,
 )
 from app.services.public_identity_service import PublicIdentityNotFoundError, get_user_by_public_id
 from app.services.scenario_catalog_service import (
@@ -292,7 +301,14 @@ async def get_scenario_catalog_api(
     _: User = Depends(require_permission("device_templates.read")),
 ) -> ScenarioCatalogRead:
     try:
-        return _scenario_catalog_read(await get_scenario_catalog(db, catalog_id))
+        async def load_from_database() -> ScenarioCatalogRead:
+            return _scenario_catalog_read(await get_scenario_catalog(db, catalog_id))
+
+        return await cache_aside(
+            scenario_catalog_key(catalog_id),
+            ScenarioCatalogRead,
+            load_from_database,
+        )
     except ScenarioCatalogError as exc:
         raise _scenario_error(exc) from exc
 
@@ -305,9 +321,11 @@ async def update_scenario_catalog_api(
     _: User = Depends(require_permission("device_templates.update")),
 ) -> ScenarioCatalogRead:
     try:
-        return _scenario_catalog_read(
+        result = _scenario_catalog_read(
             await update_scenario_catalog(db, catalog_id, payload)
         )
+        await invalidate_scenario_catalog(catalog_id)
+        return result
     except ScenarioCatalogError as exc:
         raise _scenario_error(exc) from exc
 
@@ -320,6 +338,7 @@ async def delete_scenario_catalog_api(
 ) -> None:
     try:
         await delete_scenario_catalog(db, catalog_id)
+        await invalidate_scenario_catalog(catalog_id)
     except ScenarioCatalogError as exc:
         raise _scenario_error(exc) from exc
 
@@ -337,9 +356,11 @@ async def update_scenario_catalog_item_api(
     _: User = Depends(require_permission("device_templates.update")),
 ) -> ScenarioCatalogItemRead:
     try:
-        return _scenario_item_read(
+        result = _scenario_item_read(
             await update_scenario_catalog_item(db, catalog_id, item_id, payload)
         )
+        await invalidate_scenario_catalog(catalog_id)
+        return result
     except ScenarioCatalogError as exc:
         raise _scenario_error(exc) from exc
 
@@ -359,19 +380,31 @@ async def create_device_template(payload: DeviceTemplateCreate, db: AsyncSession
 
 @router.get("/device-templates/{template_id}", response_model=DeviceTemplateRead, tags=["Device Templates"])
 async def get_device_template(template_id: int, db: AsyncSession = Depends(get_db), _: User = Depends(require_permission("device_templates.read"))) -> DeviceTemplateRead:
-    return _template_read(await _template(db, template_id))
+    async def load_from_database() -> DeviceTemplateRead:
+        return _template_read(await _template(db, template_id))
+
+    return await cache_aside(
+        device_template_key(template_id),
+        DeviceTemplateRead,
+        load_from_database,
+    )
 
 
 @router.patch("/device-templates/{template_id}", response_model=DeviceTemplateRead, tags=["Device Templates"])
 async def update_device_template(template_id: int, payload: DeviceTemplateUpdate, db: AsyncSession = Depends(get_db), _: User = Depends(require_permission("device_templates.update"))) -> DeviceTemplateRead:
     row = await _template(db, template_id)
     for key, value in payload.model_dump(exclude_unset=True).items(): setattr(row, key, value)
-    await db.commit(); return _template_read(await _template(db, template_id))
+    await db.commit()
+    await invalidate_device_template(template_id)
+    return _template_read(await _template(db, template_id))
 
 
 @router.delete("/device-templates/{template_id}", status_code=204, tags=["Device Templates"])
 async def delete_device_template(template_id: int, db: AsyncSession = Depends(get_db), _: User = Depends(require_permission("device_templates.delete"))) -> None:
-    row = await _template(db, template_id); row.is_deleted = True; await db.commit()
+    row = await _template(db, template_id)
+    row.is_deleted = True
+    await db.commit()
+    await invalidate_device_template(template_id)
 
 
 @router.get("/device-templates/{template_id}/sensors", response_model=list[TemplateSensorSlotRead], tags=["Device Templates"])
@@ -386,6 +419,7 @@ async def add_template_sensor(template_id: int, payload: TemplateSensorSlotCreat
     row = DeviceTemplateSensor(device_template_id=template_id, **payload.model_dump()); db.add(row); await db.flush()
     await sync_scenario_catalogs_for_template(db, template_id)
     await db.commit()
+    await invalidate_device_template(template_id, scenario_items_changed=True)
     return _sensor_slot(await _sensor_mapping(db, template_id, row.id))
 
 
@@ -400,7 +434,9 @@ async def update_template_sensor(template_id: int, mapping_id: int, payload: Tem
     for key, value in payload.model_dump(exclude_unset=True).items(): setattr(row, key, value)
     await db.flush()
     await sync_scenario_catalogs_for_template(db, template_id)
-    await db.commit(); return _sensor_slot(await _sensor_mapping(db, template_id, mapping_id))
+    await db.commit()
+    await invalidate_device_template(template_id, scenario_items_changed=True)
+    return _sensor_slot(await _sensor_mapping(db, template_id, mapping_id))
 
 
 @router.delete("/device-templates/{template_id}/sensors/{mapping_id}", status_code=204, tags=["Device Templates"])
@@ -408,6 +444,7 @@ async def delete_template_sensor(template_id: int, mapping_id: int, db: AsyncSes
     await db.delete(await _sensor_mapping(db, template_id, mapping_id)); await db.flush()
     await sync_scenario_catalogs_for_template(db, template_id)
     await db.commit()
+    await invalidate_device_template(template_id, scenario_items_changed=True)
 
 
 @router.get("/device-templates/{template_id}/actuators", response_model=list[TemplateActuatorSlotRead], tags=["Device Templates"])
@@ -422,6 +459,7 @@ async def add_template_actuator(template_id: int, payload: TemplateActuatorSlotC
     row = DeviceTemplateActuator(device_template_id=template_id, **payload.model_dump()); db.add(row); await db.flush()
     await sync_scenario_catalogs_for_template(db, template_id)
     await db.commit()
+    await invalidate_device_template(template_id, scenario_items_changed=True)
     return _actuator_slot(await _actuator_mapping(db, template_id, row.id))
 
 
@@ -437,7 +475,9 @@ async def update_template_actuator(template_id: int, mapping_id: int, payload: T
         setattr(row, key, value)
     await db.flush()
     await sync_scenario_catalogs_for_template(db, template_id)
-    await db.commit(); return _actuator_slot(await _actuator_mapping(db, template_id, mapping_id))
+    await db.commit()
+    await invalidate_device_template(template_id, scenario_items_changed=True)
+    return _actuator_slot(await _actuator_mapping(db, template_id, mapping_id))
 
 
 @router.delete("/device-templates/{template_id}/actuators/{mapping_id}", status_code=204, tags=["Device Templates"])
@@ -445,6 +485,7 @@ async def delete_template_actuator(template_id: int, mapping_id: int, db: AsyncS
     await db.delete(await _actuator_mapping(db, template_id, mapping_id)); await db.flush()
     await sync_scenario_catalogs_for_template(db, template_id)
     await db.commit()
+    await invalidate_device_template(template_id, scenario_items_changed=True)
 
 
 @router.get("/actuator-models", response_model=list[ActuatorModelRead], tags=["Actuator Models"])
@@ -465,17 +506,30 @@ async def _actuator_model(db: AsyncSession, model_id: int) -> ActuatorModel:
 
 
 @router.get("/actuator-models/{model_id}", response_model=ActuatorModelRead, tags=["Actuator Models"])
-async def get_actuator_model(model_id: int, db: AsyncSession = Depends(get_db), _: User = Depends(require_permission("actuator_models.read"))) -> ActuatorModel:
-    return await _actuator_model(db, model_id)
+async def get_actuator_model(model_id: int, db: AsyncSession = Depends(get_db), _: User = Depends(require_permission("actuator_models.read"))) -> ActuatorModelRead:
+    async def load_from_database() -> ActuatorModelRead:
+        return ActuatorModelRead.model_validate(await _actuator_model(db, model_id))
+
+    return await cache_aside(
+        actuator_model_key(model_id),
+        ActuatorModelRead,
+        load_from_database,
+    )
 
 
 @router.patch("/actuator-models/{model_id}", response_model=ActuatorModelRead, tags=["Actuator Models"])
 async def update_actuator_model(model_id: int, payload: ActuatorModelUpdate, db: AsyncSession = Depends(get_db), _: User = Depends(require_permission("actuator_models.update"))) -> ActuatorModel:
     row = await _actuator_model(db, model_id)
     for key, value in payload.model_dump(exclude_unset=True).items(): setattr(row, key, value)
-    await db.commit(); await db.refresh(row); return row
+    await db.commit()
+    await db.refresh(row)
+    await invalidate_actuator_model(row.id)
+    return row
 
 
 @router.delete("/actuator-models/{model_id}", status_code=204, tags=["Actuator Models"])
 async def delete_actuator_model(model_id: int, db: AsyncSession = Depends(get_db), _: User = Depends(require_permission("actuator_models.delete"))) -> None:
-    row = await _actuator_model(db, model_id); row.is_deleted = True; await db.commit()
+    row = await _actuator_model(db, model_id)
+    row.is_deleted = True
+    await db.commit()
+    await invalidate_actuator_model(row.id)

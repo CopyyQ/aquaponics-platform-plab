@@ -3,6 +3,7 @@ from copy import deepcopy
 from fastapi import FastAPI
 from fastapi.openapi.utils import get_openapi
 
+
 HTTP_METHODS = {"get", "post", "put", "patch", "delete"}
 CONFLICT_OPERATIONS = {
     ("get", "/api/v1/aquaponics-systems/{system_id}/mqtt-config/export"),

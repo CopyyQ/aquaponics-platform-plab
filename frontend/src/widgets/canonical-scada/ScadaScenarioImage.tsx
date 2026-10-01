@@ -25,7 +25,6 @@ const fallbackLabels = {
   FEEDER: "máy cho cá ăn",
   WEATHER: "thời tiết",
   LIGHT: "trạng thái đèn",
-  TANK: "mực nước bể cá",
 } as const
 
 export function ScadaScenarioImage({ runtime, localHour }: { runtime: ScenarioRuntime; localHour?: number }) {
@@ -46,10 +45,10 @@ export function ScadaScenarioImage({ runtime, localHour }: { runtime: ScenarioRu
         <CardTitle className="text-base">SCADA theo dữ liệu Project</CardTitle>
       </CardHeader>
       <CardContent className="space-y-4">
-        {selection.assetUrl && selection.label ? <div className="overflow-hidden rounded-xl border bg-muted/20">
+        {selection.assetUrl && selection.filename ? <div className="overflow-hidden rounded-xl border bg-muted/20">
           <img
             src={selection.assetUrl}
-            alt={`Sơ đồ Aquaponics theo dữ liệu Project: ${selection.label}`}
+            alt={`Sơ đồ Aquaponics theo dữ liệu Project: ${selection.filename}`}
             className="block h-auto w-full object-contain"
           />
         </div> : <div className="flex min-h-64 items-center justify-center rounded-xl border border-dashed bg-muted/20 p-8 text-center text-sm text-muted-foreground">

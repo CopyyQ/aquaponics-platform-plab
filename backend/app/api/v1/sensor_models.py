@@ -5,12 +5,13 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import require_permission
+from app.core.record_cache import cache_aside
 from app.db.session import get_db
 from app.models.sensor import Sensor, SensorModel
 from app.models.user import User
-from app.schemas.common import MessageResponse
 from app.schemas.sensor import SensorModelCreate, SensorModelRead, SensorModelUpdate
 from app.services.audit_service import write_audit
+from app.services.catalog_record_cache import invalidate_sensor_model, sensor_model_key
 
 router = APIRouter(prefix="/sensor-models", tags=["Sensor Models"])
 
@@ -73,8 +74,15 @@ async def get_sensor_model(
     model_id: int,
     db: AsyncSession = Depends(get_db),
     _: User = Depends(require_permission("sensor_models.read")),
-) -> SensorModel:
-    return await get_model_or_404(db, model_id)
+) -> SensorModelRead:
+    async def load_from_database() -> SensorModelRead:
+        return SensorModelRead.model_validate(await get_model_or_404(db, model_id))
+
+    return await cache_aside(
+        sensor_model_key(model_id),
+        SensorModelRead,
+        load_from_database,
+    )
 
 
 @router.patch("/{model_id}", response_model=SensorModelRead)
@@ -97,6 +105,7 @@ async def update_sensor_model(
     )
     await db.commit()
     await db.refresh(model)
+    await invalidate_sensor_model(model.id)
     return model
 
 
@@ -125,5 +134,6 @@ async def delete_sensor_model(
         entity_id=model.id,
     )
     await db.commit()
+    await invalidate_sensor_model(model.id)
     return Response(status_code=204)
 

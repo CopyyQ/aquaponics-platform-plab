@@ -11,6 +11,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from app.core.exceptions import ApplicationError
 from app.schemas.error import ApiErrorResponse, ApiValidationIssue
 
+
 logger = logging.getLogger(__name__)
 
 DEFAULT_ERROR_CODES = {

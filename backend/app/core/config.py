@@ -17,6 +17,9 @@ class Settings(BaseSettings):
     access_token_expire_minutes: int = Field(default=30, ge=5, le=1440)
     auth_session_days: int = Field(default=30, ge=1, le=90)
     database_url: str
+    redis_url: str | None = None
+    catalog_record_cache_ttl_seconds: int = Field(default=60, ge=1, le=3600)
+    redis_cache_socket_timeout_seconds: float = Field(default=0.5, gt=0, le=5)
     cors_origins: list[str] | str = ["http://localhost:5173"]
     fernet_key: str
     refresh_cookie_name: str = "aquaponics_refresh_token"

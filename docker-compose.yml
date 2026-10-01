@@ -16,6 +16,27 @@ services:
       timeout: 5s
       retries: 10
 
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command:
+      [
+        "redis-server",
+        "--save",
+        "",
+        "--appendonly",
+        "no",
+        "--maxmemory",
+        "256mb",
+        "--maxmemory-policy",
+        "allkeys-lru",
+      ]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
   backend:
     build:
       context: ./backend
@@ -24,8 +45,11 @@ services:
       - ./backend/.env
     environment:
       DATABASE_URL: postgresql+asyncpg://postgres:postgres@postgres:5432/aquaponics
-    ports:
-      - "8000:8000"
+      REDIS_URL: redis://redis:6379/0
+      CATALOG_RECORD_CACHE_TTL_SECONDS: 60
+      REDIS_CACHE_SOCKET_TIMEOUT_SECONDS: 0.5
+    expose:
+      - "8000"
     depends_on:
       postgres:
         condition: service_healthy
@@ -41,6 +65,22 @@ services:
       timeout: 5s
       retries: 10
       start_period: 10s
+
+  api_gateway:
+    image: nginx:1.27-alpine
+    restart: unless-stopped
+    ports:
+      - "8000:80"
+    volumes:
+      - ./infra/nginx/backend-api.conf:/etc/nginx/conf.d/default.conf:ro
+    depends_on:
+      backend:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--output-document=/dev/null", "http://127.0.0.1/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
   mqtt:
     image: eclipse-mosquitto:2

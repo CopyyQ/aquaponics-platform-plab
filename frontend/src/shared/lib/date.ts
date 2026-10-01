@@ -43,28 +43,3 @@ export function formatRelative(value?: string | null) {
   if (!value) return "Chưa kết nối"
   return formatDistanceToNow(parseApiDate(value), { addSuffix: true, locale: vi })
 }
-
-function vietnamParts(value: Date, options: Intl.DateTimeFormatOptions) {
-  const parts = new Intl.DateTimeFormat("vi-VN", { timeZone: VIETNAM_TIME_ZONE, ...options }).formatToParts(value)
-  return (type: Intl.DateTimeFormatPartTypes) => parts.find((part) => part.type === type)?.value ?? ""
-}
-
-/** Ngày theo giờ Việt Nam, dạng 26/09/2026. */
-export function formatVietnamDate(value: Date) {
-  const get = vietnamParts(value, { day: "2-digit", month: "2-digit", year: "numeric" })
-  return `${get("day")}/${get("month")}/${get("year")}`
-}
-
-/** Giờ phút theo giờ Việt Nam, dạng 08:45. */
-export function formatVietnamClock(value: Date) {
-  const get = vietnamParts(value, { hour: "2-digit", minute: "2-digit", hourCycle: "h23" })
-  return `${get("hour")}:${get("minute")}`
-}
-
-/**
- * Số mili giây còn lại tới đầu phút kế tiếp, để đồng hồ nhảy đúng lúc đổi phút
- * thay vì đếm lùi mỗi giây.
- */
-export function msUntilNextMinute(value: Date) {
-  return 60_000 - (value.getTime() % 60_000)
-}

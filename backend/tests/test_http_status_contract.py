@@ -1,4 +1,5 @@
 import ast
+import json
 from pathlib import Path
 
 import pytest
@@ -199,6 +200,11 @@ def test_create_system_for_user_documents_503_generation_failure() -> None:
     schema = operation["responses"]["503"]["content"]["application/json"]["schema"]
     assert schema["$ref"] == "#/components/schemas/ApiErrorResponse"
 
+
+def test_exported_openapi_matches_runtime_contract() -> None:
+    exported_path = Path(__file__).resolve().parents[1] / "openapi.json"
+    exported = json.loads(exported_path.read_text(encoding="utf-8"))
+    assert exported == _openapi()
 
 
 def test_role_assignment_documents_payload_reference_404() -> None:

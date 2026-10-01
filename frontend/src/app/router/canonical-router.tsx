@@ -30,7 +30,6 @@ const SensorDetailPage = lazyNamed(() => import("@/pages/sensor-detail-canonical
 const ActuatorDetailPage = lazyNamed(() => import("@/pages/actuator-detail-canonical"), "ActuatorDetailPage")
 const AlertsPage = lazyNamed(() => import("@/pages/alerts-activation"), "AlertsPage")
 const OperatorAlertsPage = lazyNamed(() => import("@/pages/operator-alerts/OperatorAlertsPage"), "OperatorAlertsPage")
-const OwnerAlertsPage = lazyNamed(() => import("@/pages/owner-alerts/OwnerAlertsPage"), "OwnerAlertsPage")
 const AlertDetailPage = lazyNamed(() => import("@/pages/alert-detail-canonical"), "AlertDetailPage")
 const MembersPage = lazyNamed(() => import("@/pages/members"), "MembersPage")
 const ActivitiesPage = lazyNamed(() => import("@/pages/activities"), "ActivitiesPage")
@@ -111,7 +110,7 @@ const router = createBrowserRouter([
       { path: "devices/:deviceId/scenarios/:scenarioId", ...permitted("project_scenarios.read", <ProjectScenarioDetailPage />) },
       { path: "devices/:deviceId/sensors/:sensorId", ...permitted("sensors.read", <SensorDetailPage />) },
       { path: "devices/:deviceId/actuators/:actuatorId", ...permitted("actuators.read", <ActuatorDetailPage />) },
-      { path: "alerts", ...permitted("incidents.read", <OperatorOrAdmin admin={<AlertsPage />} operator={<OperatorAlertsPage />} owner={<OwnerAlertsPage />} />) },
+      { path: "alerts", ...permitted("incidents.read", <OperatorOrAdmin admin={<AlertsPage />} operator={<OperatorAlertsPage />} />) },
       { path: "alerts/:alertId", ...permitted("incidents.read", <AlertDetailPage />) },
       { path: "members", ...permitted("aquaponics_systems.read", <MembersPage />) },
       { path: "activities", ...permitted("activities.read", <ActivitiesPage />) },

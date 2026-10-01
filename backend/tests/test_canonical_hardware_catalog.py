@@ -28,6 +28,7 @@ from scripts.seed import (
     SENSOR_MODELS,
 )
 
+
 EXPECTED_SENSOR_CODES = (
     "NH3",
     "NO3",

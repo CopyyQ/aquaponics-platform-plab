@@ -19,31 +19,6 @@ frontend/test-results/
 frontend/playwright-report/
 frontend/blob-report/
 
-# Local agent/tool configuration and skills
-.agents/*
-!.agents/skills/
-.agents/skills/*
-!.agents/skills/aquaponics-scada-threejs/
-!.agents/skills/aquaponics-scada-threejs/**
-!.agents/skills/aquaponics-shared-ui/
-!.agents/skills/aquaponics-shared-ui/**
-!.agents/skills/aquaponics-ba-review/
-!.agents/skills/aquaponics-ba-review/**
-!.agents/skills/aquaponics-backend-review/
-!.agents/skills/aquaponics-backend-review/**
-!.agents/skills/aquaponics-test-review/
-!.agents/skills/aquaponics-test-review/**
-!.agents/skills/aquaponics-security-review/
-!.agents/skills/aquaponics-security-review/**
-!.agents/skills/aquaponics-full-review/
-!.agents/skills/aquaponics-full-review/**
-.codex/
-.claude/
-**/.mcp.json
-skills-lock.json
-**/*[dD][oO][cC][xX]*skill*/
-**/*docx*/SKILL.md
-
 # Secrets and local credentials
 .env.*
 !.env.example

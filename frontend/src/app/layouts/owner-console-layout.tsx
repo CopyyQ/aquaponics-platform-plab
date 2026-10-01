@@ -6,7 +6,6 @@ import { getSystem, listSystems, queryKeys } from "@/api/resources"
 import { useAuth } from "@/app/auth"
 import { OwnerProfileDialog } from "@/widgets/owner-console/OwnerProfileDialog"
 import { Avatar, AvatarFallback } from "@/shared/ui/avatar"
-import { CurrentDateTime } from "@/shared/ui/current-datetime"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from "@/shared/ui/dropdown-menu"
 import { Skeleton } from "@/shared/ui/skeleton"
 
@@ -48,8 +47,6 @@ export function OwnerConsoleLayout() {
           </div>
 
           <div className="flex items-center gap-3 shrink-0">
-            {/* Cảnh báo đã chuyển hẳn về thẻ Tình trạng hệ thống trên sơ đồ */}
-            <CurrentDateTime className="hidden text-sm font-semibold text-white/90 tabular-nums sm:block" />
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 {/* Trigger: avatar (nhận diện) + tên người đang đăng nhập + chevron (báo có menu) */}
