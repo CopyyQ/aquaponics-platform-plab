@@ -1,0 +1,7 @@
+# Domain lay tu bien moi truong DOMAIN (khai bao trong file .env o thu muc goc).
+# Caddy tu xin va gia han chung chi Let's Encrypt, mien la ban ghi A cua domain
+# da tro ve IP VPS va cong 80/443 mo ra Internet.
+{$DOMAIN} {
+  encode zstd gzip
+  reverse_proxy frontend:80
+}
